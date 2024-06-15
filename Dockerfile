@@ -1,4 +1,5 @@
-FROM golang:buster as builder
+# Stage 1
+FROM golang:alpine as builder
 
 WORKDIR /app
 
@@ -6,9 +7,10 @@ COPY go.* ./
 RUN go mod download
 
 COPY . ./
-RUN go mod tidy
+
 RUN go build -mod=readonly -v -o server
 
+# Stage 2
 FROM debian:buster-slim
 RUN set -x && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
     ca-certificates && \
@@ -16,5 +18,4 @@ RUN set -x && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -
 
 COPY --from=builder /app/server /app/server
 
-# Run the web service on container startup.
 CMD ["/app/server"]
