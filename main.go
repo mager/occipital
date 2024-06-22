@@ -30,18 +30,14 @@ func main() {
 
 			AsRoute(health.NewHealthHandler),
 
-			fx.Annotate(
-				NewServeMux,
-				fx.ParamTags(`group:"routes"`),
-			),
-
 			zap.NewProduction,
 		),
 		fx.Invoke(func(*http.Server) {}),
 	).Run()
 }
 
-func NewHTTPServer(lc fx.Lifecycle, mux *http.ServeMux) *http.Server {
+func NewHTTPServer(lc fx.Lifecycle, spotifyClient *spotify.SpotifyClient, logger *zap.Logger) *http.Server {
+	mux := http.NewServeMux()
 	srv := &http.Server{Addr: ":8080", Handler: mux}
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
@@ -57,17 +53,10 @@ func NewHTTPServer(lc fx.Lifecycle, mux *http.ServeMux) *http.Server {
 			return srv.Shutdown(ctx)
 		},
 	})
-	return srv
-}
 
-// NewServeMux builds a ServeMux that will route requests
-// to the given EchoHandler.
-func NewServeMux(routes []Route) *http.ServeMux {
-	mux := http.NewServeMux()
-	for _, route := range routes {
-		mux.Handle(route.Pattern(), route)
-	}
-	return mux
+	healthHandler := health.NewHealthHandler(logger, spotifyClient)
+	mux.Handle(healthHandler.Pattern(), healthHandler)
+	return srv
 }
 
 // AsRoute annotates the given constructor to state that

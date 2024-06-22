@@ -4,13 +4,15 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/mager/occipital/spotify"
 	"go.uber.org/zap"
 )
 
 // HealthHandler is an http.Handler that copies its request body
 // back to the response.
 type HealthHandler struct {
-	log *zap.Logger
+	log           *zap.Logger
+	spotifyClient *spotify.SpotifyClient
 }
 
 func (*HealthHandler) Pattern() string {
@@ -18,14 +20,16 @@ func (*HealthHandler) Pattern() string {
 }
 
 // NewHealthHandler builds a new HealthHandler.
-func NewHealthHandler(log *zap.Logger) *HealthHandler {
+func NewHealthHandler(log *zap.Logger, spotifyClient *spotify.SpotifyClient) *HealthHandler {
 	return &HealthHandler{
-		log: log,
+		log:           log,
+		spotifyClient: spotifyClient,
 	}
 }
 
 type Response struct {
-	Status string `json:"status"`
+	Server  bool `json:"server"`
+	Spotify bool `json:"spotify"`
 }
 
 // ServeHTTP handles an HTTP request to the /echo endpoint.
@@ -34,7 +38,12 @@ func (h *HealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	h.log.Info("health check")
 
-	resp.Status = "OK"
+	resp.Server = true
+
+	// Make sure Spotify client is set up properly
+	if h.spotifyClient.ID != "" && h.spotifyClient.Secret != "" {
+		resp.Spotify = true
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)

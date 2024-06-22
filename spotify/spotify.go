@@ -1,10 +1,9 @@
 package spotify
 
 import (
+	"github.com/mager/occipital/config"
 	"github.com/zmb3/spotify/v2"
 	spotifyauth "github.com/zmb3/spotify/v2/auth"
-	"go.uber.org/zap"
-	"honnef.co/go/tools/config"
 )
 
 const redirectURI = "http://localhost:8080/callback"
@@ -16,15 +15,15 @@ var (
 )
 
 type SpotifyClient struct {
-	Client *spotify.Client
 	ID     string
 	Secret string
 }
 
-func ProvideSpotify(cfg config.Config, log zap.Logger) *SpotifyClient {
+func ProvideSpotify(cfg config.Config) *SpotifyClient {
 	var c SpotifyClient
 
-	log.Info("setting up spotify client")
+	c.ID = cfg.SpotifyID
+	c.Secret = cfg.SpotifySecret
 
 	return &c
 }
