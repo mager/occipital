@@ -2,7 +2,7 @@ dev:
 	go mod tidy && go run main.go
 
 test:
-	go test ./...
+	go test -v ./...
 
 build:
 	gcloud builds submit --tag gcr.io/beatbrain-dev/occipital

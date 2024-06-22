@@ -3,19 +3,25 @@ package health
 import (
 	"encoding/json"
 	"net/http"
+
+	"go.uber.org/zap"
 )
 
 // HealthHandler is an http.Handler that copies its request body
 // back to the response.
-type HealthHandler struct{}
+type HealthHandler struct {
+	log *zap.Logger
+}
 
 func (*HealthHandler) Pattern() string {
 	return "/health"
 }
 
 // NewHealthHandler builds a new HealthHandler.
-func NewHealthHandler() *HealthHandler {
-	return &HealthHandler{}
+func NewHealthHandler(log *zap.Logger) *HealthHandler {
+	return &HealthHandler{
+		log: log,
+	}
 }
 
 type Response struct {
@@ -23,8 +29,10 @@ type Response struct {
 }
 
 // ServeHTTP handles an HTTP request to the /echo endpoint.
-func (*HealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *HealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var resp Response
+
+	h.log.Info("health check")
 
 	resp.Status = "OK"
 

@@ -6,8 +6,11 @@ import (
 	"net"
 	"net/http"
 
+	"github.com/mager/occipital/config"
 	"github.com/mager/occipital/handler/health"
+	"github.com/mager/occipital/spotify"
 	"go.uber.org/fx"
+	"go.uber.org/zap"
 )
 
 // Route is an http.Handler that knows the mux pattern
@@ -21,15 +24,21 @@ type Route interface {
 
 func main() {
 	fx.New(
-		fx.Provide(NewHTTPServer, NewServeMux,
+		fx.Provide(NewHTTPServer,
+			config.Options,
+			spotify.Options,
+
+			AsRoute(health.NewHealthHandler),
+
 			fx.Annotate(
-				health.NewHealthHandler,
-				fx.As(new(Route)),
+				NewServeMux,
+				fx.ParamTags(`group:"routes"`),
 			),
+
+			zap.NewProduction,
 		),
 		fx.Invoke(func(*http.Server) {}),
 	).Run()
-
 }
 
 func NewHTTPServer(lc fx.Lifecycle, mux *http.ServeMux) *http.Server {
@@ -53,8 +62,20 @@ func NewHTTPServer(lc fx.Lifecycle, mux *http.ServeMux) *http.Server {
 
 // NewServeMux builds a ServeMux that will route requests
 // to the given EchoHandler.
-func NewServeMux(route Route) *http.ServeMux {
+func NewServeMux(routes []Route) *http.ServeMux {
 	mux := http.NewServeMux()
-	mux.Handle(route.Pattern(), route)
+	for _, route := range routes {
+		mux.Handle(route.Pattern(), route)
+	}
 	return mux
+}
+
+// AsRoute annotates the given constructor to state that
+// it provides a route to the "routes" group.
+func AsRoute(f any) any {
+	return fx.Annotate(
+		f,
+		fx.As(new(Route)),
+		fx.ResultTags(`group:"routes"`),
+	)
 }
