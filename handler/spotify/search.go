@@ -3,8 +3,8 @@ package spotify
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"net/http"
+	"strings"
 
 	spot "github.com/zmb3/spotify/v2"
 
@@ -31,29 +31,56 @@ func NewSearchHandler(log *zap.Logger, spotifyClient *spotify.SpotifyClient) *Se
 	}
 }
 
+type Request struct {
+	Query string `json:"query"`
+}
+
 type Response struct {
 	Results []Track `json:"results"`
 }
 
 type Track struct {
-	Name string `json:"name"`
+	Artist     string `json:"artist"`
+	Name       string `json:"name"`
+	Popularity int    `json:"popularity"`
 }
 
 // ServeHTTP handles an HTTP request to the /echo endpoint.
 func (h *SearchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
-	var resp Response
+	var req Request
 	w.Header().Set("Content-Type", "application/json")
 
-	results, err := h.spotifyClient.Client.Search(ctx, "lunch", spot.SearchTypeTrack)
-	if err != nil {
-		log.Fatal(err)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
+
+	// Validate search query
+	if req.Query == "" {
+		http.Error(w, "missing search query", http.StatusBadRequest)
+		return
+	}
+
+	results, err := h.spotifyClient.Client.Search(ctx, req.Query, spot.SearchTypeTrack)
+	if err != nil {
+		http.Error(w, "Search error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var resp Response
 
 	if results.Tracks != nil {
 		for _, item := range results.Tracks.Tracks {
 			var t Track
+			if len(item.Artists) > 0 {
+				var artist strings.Builder
+				for _, a := range item.Artists {
+					artist.WriteString(a.Name)
+				}
+			}
 			t.Name = item.Name
+			t.Popularity = int(item.Popularity)
 			resp.Results = append(resp.Results, t)
 		}
 	}
