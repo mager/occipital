@@ -1,5 +1,13 @@
 # occipital
 
+## Development
+
+To start the local dev server, run `go run main.go` which is aliased:
+
+```
+make dev
+```
+
 ## Google Cloud Setup
 
 - `gcloud projects create beatbrain-dev` - Create a new project

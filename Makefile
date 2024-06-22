@@ -8,7 +8,7 @@ build:
 	gcloud builds submit --tag gcr.io/beatbrain-dev/occipital
 
 deploy:
-	gcloud run deploy bouncer \
+	gcloud run deploy occipital \
 		--image gcr.io/beatbrain-dev/occipital \
 		--platform managed
 
