@@ -2,12 +2,12 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"net/http"
 
 	"github.com/mager/occipital/config"
 	"github.com/mager/occipital/handler/health"
+	spotHandler "github.com/mager/occipital/handler/spotify"
 	"github.com/mager/occipital/spotify"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
@@ -45,7 +45,7 @@ func NewHTTPServer(lc fx.Lifecycle, spotifyClient *spotify.SpotifyClient, logger
 			if err != nil {
 				return err
 			}
-			fmt.Println("Starting HTTP server at", srv.Addr)
+			logger.Sugar().Infof("Starting HTTP server at", srv.Addr)
 			go srv.Serve(ln)
 			return nil
 		},
@@ -56,6 +56,10 @@ func NewHTTPServer(lc fx.Lifecycle, spotifyClient *spotify.SpotifyClient, logger
 
 	healthHandler := health.NewHealthHandler(logger, spotifyClient)
 	mux.Handle(healthHandler.Pattern(), healthHandler)
+
+	spotifySearchHandler := spotHandler.NewSearchHandler(logger, spotifyClient)
+	mux.Handle(spotifySearchHandler.Pattern(), spotifySearchHandler)
+
 	return srv
 }
 
