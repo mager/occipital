@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"sort"
-	"strings"
 
 	spot "github.com/zmb3/spotify/v2"
 
@@ -44,6 +43,7 @@ type SearchTrack struct {
 	Artist     string `json:"artist"`
 	Name       string `json:"name"`
 	Popularity int    `json:"popularity"`
+	ID         string `json:"id"`
 }
 
 // ServeHTTP handles an HTTP request to the /spotify/search endpoint
@@ -76,12 +76,8 @@ func (h *SearchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if results.Tracks != nil {
 		for _, item := range results.Tracks.Tracks {
 			var t SearchTrack
-			if len(item.Artists) > 0 {
-				var artist strings.Builder
-				for _, a := range item.Artists {
-					artist.WriteString(a.Name)
-				}
-			}
+			t.Artist = spotify.GetFirstArtist(item.Artists)
+			t.ID = string(item.ID)
 			t.Name = item.Name
 			t.Popularity = int(item.Popularity)
 			resp.Results = append(resp.Results, t)
