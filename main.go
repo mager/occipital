@@ -54,11 +54,15 @@ func NewHTTPServer(lc fx.Lifecycle, spotifyClient *spotify.SpotifyClient, logger
 		},
 	})
 
+	// Define handlers
 	healthHandler := health.NewHealthHandler(logger, spotifyClient)
 	mux.Handle(healthHandler.Pattern(), healthHandler)
 
 	spotifySearchHandler := spotHandler.NewSearchHandler(logger, spotifyClient)
 	mux.Handle(spotifySearchHandler.Pattern(), spotifySearchHandler)
+
+	spotifyGetFeaturedTracksHandler := spotHandler.NewGetFeaturedTracksHandler(logger, spotifyClient)
+	mux.Handle(spotifyGetFeaturedTracksHandler.Pattern(), spotifyGetFeaturedTracksHandler)
 
 	return srv
 }

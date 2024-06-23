@@ -31,24 +31,24 @@ func NewSearchHandler(log *zap.Logger, spotifyClient *spotify.SpotifyClient) *Se
 	}
 }
 
-type Request struct {
+type SearchRequest struct {
 	Query string `json:"query"`
 }
 
-type Response struct {
-	Results []Track `json:"results"`
+type SearchResponse struct {
+	Results []SearchTrack `json:"results"`
 }
 
-type Track struct {
+type SearchTrack struct {
 	Artist     string `json:"artist"`
 	Name       string `json:"name"`
 	Popularity int    `json:"popularity"`
 }
 
-// ServeHTTP handles an HTTP request to the /echo endpoint.
+// ServeHTTP handles an HTTP request to the /spotify/search endpoint
 func (h *SearchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
-	var req Request
+	var req SearchRequest
 	w.Header().Set("Content-Type", "application/json")
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -62,17 +62,19 @@ func (h *SearchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.log.Sugar().Infow("search", "query", req.Query)
+
 	results, err := h.spotifyClient.Client.Search(ctx, req.Query, spot.SearchTypeTrack)
 	if err != nil {
-		http.Error(w, "Search error: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "search error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	var resp Response
+	var resp SearchResponse
 
 	if results.Tracks != nil {
 		for _, item := range results.Tracks.Tracks {
-			var t Track
+			var t SearchTrack
 			if len(item.Artists) > 0 {
 				var artist strings.Builder
 				for _, a := range item.Artists {
