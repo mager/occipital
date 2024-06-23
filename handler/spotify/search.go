@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strings"
 
 	spot "github.com/zmb3/spotify/v2"
@@ -85,6 +86,11 @@ func (h *SearchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			t.Popularity = int(item.Popularity)
 			resp.Results = append(resp.Results, t)
 		}
+
+		// Sorting by Popularity (descending order)
+		sort.Slice(resp.Results, func(i, j int) bool {
+			return resp.Results[i].Popularity > resp.Results[j].Popularity
+		})
 	}
 
 	json.NewEncoder(w).Encode(resp)
