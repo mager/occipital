@@ -40,10 +40,11 @@ type SearchResponse struct {
 }
 
 type SearchTrack struct {
-	Artist     string `json:"artist"`
-	Name       string `json:"name"`
-	Popularity int    `json:"popularity"`
-	ID         string `json:"id"`
+	Artist     string  `json:"artist"`
+	ID         string  `json:"id"`
+	Name       string  `json:"name"`
+	Popularity int     `json:"popularity"`
+	Thumb      *string `json:"thumb"`
 }
 
 // ServeHTTP handles an HTTP request to the /spotify/search endpoint
@@ -75,12 +76,7 @@ func (h *SearchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if results.Tracks != nil {
 		for _, item := range results.Tracks.Tracks {
-			var t SearchTrack
-			t.Artist = spotify.GetFirstArtist(item.Artists)
-			t.ID = string(item.ID)
-			t.Name = item.Name
-			t.Popularity = int(item.Popularity)
-			resp.Results = append(resp.Results, t)
+			resp.Results = append(resp.Results, mapTrack(item))
 		}
 
 		// Sorting by Popularity (descending order)
@@ -90,4 +86,37 @@ func (h *SearchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(resp)
+}
+
+func mapTrack(t spot.FullTrack) SearchTrack {
+	var o SearchTrack
+
+	o.Artist = spotify.GetFirstArtist(t.Artists)
+	o.ID = string(t.ID)
+	o.Name = t.Name
+	o.Popularity = int(t.Popularity)
+
+	o.Thumb = getThumb(t.Album)
+
+	return o
+}
+
+func getThumb(a spot.SimpleAlbum) *string {
+	var o string
+	if len(a.Images) > 0 {
+		// Find the smallest thumbnail
+		smallestImage := a.Images[0]
+
+		// Iterate through all images to find the smallest one
+		for _, img := range a.Images {
+			if img.Height < smallestImage.Height {
+				smallestImage = img
+			}
+		}
+
+		// Set the smallest image URL to the Thumb field
+		o = smallestImage.URL
+	}
+
+	return &o
 }
