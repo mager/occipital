@@ -22,6 +22,15 @@ type Route interface {
 	Pattern() string
 }
 
+//	@title			Occipital
+//	@version		1.0
+//	@description	This is the API for occipital
+
+//	@license.name	Apache 2.0
+//	@license.url	http://www.apache.org/licenses/LICENSE-2.0.html
+
+// @host		localhost:8080
+// @BasePath	/
 func main() {
 	fx.New(
 		fx.Provide(NewHTTPServer,

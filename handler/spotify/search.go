@@ -47,7 +47,15 @@ type SearchTrack struct {
 	Thumb      *string `json:"thumb"`
 }
 
-// ServeHTTP handles an HTTP request to the /spotify/search endpoint
+// Search for tracks on Spotify
+// @Summary Search Spotify for tracks
+// @Description Search for tracks on Spotify using a query string.
+// @Tags Spotify
+// @Accept json
+// @Produce json
+// @Param request body SearchRequest true "Search query"
+// @Success 200 {object} SearchResponse
+// @Router /spotify/search [post]
 func (h *SearchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 	var req SearchRequest

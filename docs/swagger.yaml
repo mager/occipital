@@ -1,0 +1,60 @@
+basePath: /
+definitions:
+  spotify.SearchRequest:
+    properties:
+      query:
+        type: string
+    type: object
+  spotify.SearchResponse:
+    properties:
+      results:
+        items:
+          $ref: '#/definitions/spotify.SearchTrack'
+        type: array
+    type: object
+  spotify.SearchTrack:
+    properties:
+      artist:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      popularity:
+        type: integer
+      thumb:
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: This is the API for occipital
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+  title: Occipital
+  version: "1.0"
+paths:
+  /spotify/search:
+    post:
+      consumes:
+      - application/json
+      description: Search for tracks on Spotify using a query string.
+      parameters:
+      - description: Search query
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/spotify.SearchRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/spotify.SearchResponse'
+      summary: Search Spotify for tracks
+      tags:
+      - Spotify
+swagger: "2.0"
