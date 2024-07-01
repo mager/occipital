@@ -37,11 +37,21 @@ type GetFeaturedTracksResponse struct {
 }
 
 type FeaturedTrack struct {
-	Artist string `json:"artist"`
-	Name   string `json:"name"`
+	Artist   string `json:"artist"`
+	Name     string `json:"name"`
+	SourceID string `json:"source_id"`
+	Source   string `json:"source"`
+	Image    string `json:"image"`
 }
 
-// ServeHTTP handles an HTTP request to the /echo endpoint.
+// Get featured tracks on Spotify
+// @Summary Get featured tracks on Spotify
+// @Description Get the top featured tracks on Spotify
+// @Tags Spotify
+// @Accept json
+// @Produce json
+// @Success 200 {object} GetFeaturedTracksResponse
+// @Router /spotify/get_featured_tracks [get]
 func (h *GetFeaturedTracksHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -57,7 +67,6 @@ func (h *GetFeaturedTracksHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 	for _, playlist := range p.Playlists[:min(10, len(p.Playlists))] {
 		playlistURIs = append(playlistURIs, playlist.URI)
 	}
-	h.log.Sugar().Infow("test playlists", "playlist uris", playlistURIs, "len", len(playlistURIs))
 
 	// Fetch the 10 playlists and get the first 10 songs
 	tracks := make([]FeaturedTrack, 0, 100)
@@ -71,12 +80,12 @@ func (h *GetFeaturedTracksHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 			var t FeaturedTrack
 			t.Name = track.Track.Track.Name
 			t.Artist = spotify.GetFirstArtist(track.Track.Track.Artists)
+			t.Source = "SPOTIFY"
+			t.SourceID = string(track.Track.Track.ID)
+			t.Image = *getThumb(track.Track.Track.Album)
 			tracks = append(tracks, t)
-
-			h.log.Sugar().Infow("adding song", "title", t.Name, "artist", t.Artist)
 		}
 	}
-	h.log.Sugar().Infow("test tracks", "len", len(tracks))
 
 	var resp GetFeaturedTracksResponse
 

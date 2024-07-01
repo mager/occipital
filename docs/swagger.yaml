@@ -1,5 +1,25 @@
 basePath: /
 definitions:
+  spotify.FeaturedTrack:
+    properties:
+      artist:
+        type: string
+      image:
+        type: string
+      name:
+        type: string
+      source:
+        type: string
+      source_id:
+        type: string
+    type: object
+  spotify.GetFeaturedTracksResponse:
+    properties:
+      tracks:
+        items:
+          $ref: '#/definitions/spotify.FeaturedTrack'
+        type: array
+    type: object
   spotify.SearchRequest:
     properties:
       query:
@@ -35,6 +55,21 @@ info:
   title: Occipital
   version: "1.0"
 paths:
+  /spotify/get_featured_tracks:
+    get:
+      consumes:
+      - application/json
+      description: Get the top featured tracks on Spotify
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/spotify.GetFeaturedTracksResponse'
+      summary: Get featured tracks on Spotify
+      tags:
+      - Spotify
   /spotify/search:
     post:
       consumes:
