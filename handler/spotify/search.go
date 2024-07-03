@@ -108,23 +108,17 @@ func mapTrack(t spot.FullTrack) SearchTrack {
 
 	return o
 }
-
 func getThumb(a spot.SimpleAlbum) *string {
 	var o string
-	if len(a.Images) > 0 {
-		// Find the smallest thumbnail
-		smallestImage := a.Images[0]
 
-		// Iterate through all images to find the smallest one
-		for _, img := range a.Images {
-			if img.Height < smallestImage.Height {
-				smallestImage = img
-			}
+	// Iterate through all images to find the one with height and width 300
+	for _, img := range a.Images {
+		if img.Height == 300 && img.Width == 300 {
+			o = img.URL
+			return &o
 		}
-
-		// Set the smallest image URL to the Thumb field
-		o = smallestImage.URL
 	}
 
-	return &o
+	// If no image with height and width 300 is found, return nil
+	return nil
 }
