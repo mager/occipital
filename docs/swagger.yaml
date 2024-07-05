@@ -45,6 +45,24 @@ definitions:
       thumb:
         type: string
     type: object
+  track.GetTrackResponse:
+    properties:
+      track:
+        $ref: '#/definitions/track.Track'
+    type: object
+  track.Track:
+    properties:
+      artist:
+        type: string
+      image:
+        type: string
+      name:
+        type: string
+      source:
+        type: string
+      source_id:
+        type: string
+    type: object
 host: localhost:8080
 info:
   contact: {}
@@ -92,4 +110,17 @@ paths:
       summary: Search Spotify for tracks
       tags:
       - Spotify
+  /track:
+    get:
+      consumes:
+      - application/json
+      description: Get track
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/track.GetTrackResponse'
+      summary: Get track
 swagger: "2.0"

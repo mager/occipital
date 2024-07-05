@@ -15,8 +15,8 @@ type GetTrackHandler struct {
 	spotifyClient *spotify.SpotifyClient
 }
 
-func (*GetTrackHandler) Pattern(source, sourceId string) string {
-	return fmt.Sprintf("/track/%s/%s", source, sourceId)
+func (*GetTrackHandler) Pattern() string {
+	return fmt.Sprintf("/track")
 }
 
 // NewGetTrackHandler builds a new GetTrackHandler.
@@ -27,7 +27,7 @@ func NewGetTrackHandler(log *zap.Logger, spotifyClient *spotify.SpotifyClient) *
 	}
 }
 
-type GetFeaturedTracksRequest struct {
+type GetTrackRequest struct {
 	SourceID string `json:"source_id"`
 	Source   string `json:"source"`
 }
@@ -50,11 +50,15 @@ type Track struct {
 // @Accept json
 // @Produce json
 // @Success 200 {object} GetTrackResponse
-// @Router /spotify/get_featured_tracks [get]
+// @Router /track [get]
 func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
 	// ctx := context.Background()
+	w.Header().Set("Content-Type", "application/json")
+	q := r.URL.Query()
+	sourceId := q.Get("sourceId")
+	source := q.Get("source")
+
+	h.log.Sugar().Infow("req", zap.String("sourceId", sourceId), zap.String("source", source))
 	// _, p, err := h.spotifyClient.Client.GetTrack(ctx, spot.ID())
 	// if err != nil {
 	// 	http.Error(w, "featured playlist error: "+err.Error(), http.StatusInternalServerError)
@@ -63,8 +67,8 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var resp GetTrackResponse
 
-	var t *Track
-	resp.Track = *t
+	var t Track
+	resp.Track = t
 
 	json.NewEncoder(w).Encode(resp)
 }

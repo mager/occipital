@@ -75,6 +75,26 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/track": {
+            "get": {
+                "description": "Get track",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "summary": "Get track",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/track.GetTrackResponse"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
@@ -144,6 +164,34 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "thumb": {
+                    "type": "string"
+                }
+            }
+        },
+        "track.GetTrackResponse": {
+            "type": "object",
+            "properties": {
+                "track": {
+                    "$ref": "#/definitions/track.Track"
+                }
+            }
+        },
+        "track.Track": {
+            "type": "object",
+            "properties": {
+                "artist": {
+                    "type": "string"
+                },
+                "image": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "source_id": {
                     "type": "string"
                 }
             }

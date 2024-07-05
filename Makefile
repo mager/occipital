@@ -16,5 +16,5 @@ ship:
 	make test && make build && make deploy
 
 openapi:
-	swag init --parseDependency --parseInternal
+	~/go/bin/swag init --parseDependency --parseInternal
 	openapi2postmanv2 -s docs/swagger.yaml -o docs/postman.json

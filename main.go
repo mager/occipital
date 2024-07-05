@@ -8,6 +8,7 @@ import (
 	"github.com/mager/occipital/config"
 	"github.com/mager/occipital/handler/health"
 	spotHandler "github.com/mager/occipital/handler/spotify"
+	trackHandler "github.com/mager/occipital/handler/track"
 	"github.com/mager/occipital/spotify"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
@@ -72,6 +73,9 @@ func NewHTTPServer(lc fx.Lifecycle, spotifyClient *spotify.SpotifyClient, logger
 
 	spotifyGetFeaturedTracksHandler := spotHandler.NewGetFeaturedTracksHandler(logger, spotifyClient)
 	mux.Handle(spotifyGetFeaturedTracksHandler.Pattern(), spotifyGetFeaturedTracksHandler)
+
+	spotifyGetTrackHandler := trackHandler.NewGetTrackHandler(logger, spotifyClient)
+	mux.Handle(spotifyGetTrackHandler.Pattern(), spotifyGetTrackHandler)
 
 	return srv
 }
