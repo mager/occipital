@@ -9,6 +9,7 @@ import (
 	spot "github.com/zmb3/spotify/v2"
 
 	"github.com/mager/occipital/spotify"
+	"github.com/mager/occipital/util"
 	"go.uber.org/zap"
 )
 
@@ -99,26 +100,12 @@ func (h *SearchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func mapTrack(t spot.FullTrack) SearchTrack {
 	var o SearchTrack
 
-	o.Artist = spotify.GetFirstArtist(t.Artists)
+	o.Artist = util.GetFirstArtist(t.Artists)
 	o.ID = string(t.ID)
 	o.Name = t.Name
 	o.Popularity = int(t.Popularity)
 
-	o.Thumb = getThumb(t.Album)
+	o.Thumb = util.GetThumb(t.Album)
 
 	return o
-}
-func getThumb(a spot.SimpleAlbum) *string {
-	var o string
-
-	// Iterate through all images to find the one with height and width 300
-	for _, img := range a.Images {
-		if img.Height == 300 && img.Width == 300 {
-			o = img.URL
-			return &o
-		}
-	}
-
-	// If no image with height and width 300 is found, return nil
-	return nil
 }

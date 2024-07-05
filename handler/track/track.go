@@ -1,11 +1,15 @@
 package track
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 
+	spot "github.com/zmb3/spotify/v2"
+
 	"github.com/mager/occipital/spotify"
+	"github.com/mager/occipital/util"
 	"go.uber.org/zap"
 )
 
@@ -52,23 +56,30 @@ type Track struct {
 // @Success 200 {object} GetTrackResponse
 // @Router /track [get]
 func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// ctx := context.Background()
+	ctx := context.Background()
 	w.Header().Set("Content-Type", "application/json")
 	q := r.URL.Query()
 	sourceId := q.Get("sourceId")
 	source := q.Get("source")
 
+	t, err := h.spotifyClient.Client.GetTrack(ctx, spot.ID(sourceId))
+	if err != nil {
+		http.Error(w, "featured playlist error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 	h.log.Sugar().Infow("req", zap.String("sourceId", sourceId), zap.String("source", source))
-	// _, p, err := h.spotifyClient.Client.GetTrack(ctx, spot.ID())
-	// if err != nil {
-	// 	http.Error(w, "featured playlist error: "+err.Error(), http.StatusInternalServerError)
-	// 	return
-	// }
+	h.log.Sugar().Infow("resp", zap.Any("t", t))
 
 	var resp GetTrackResponse
+	var track Track
 
-	var t Track
-	resp.Track = t
+	track.Name = t.Name
+	track.Artist = util.GetFirstArtist(t.Artists)
+	track.SourceID = sourceId
+	track.Source = source
+	track.Image = *util.GetThumb(t.Album)
+
+	resp.Track = track
 
 	json.NewEncoder(w).Encode(resp)
 }

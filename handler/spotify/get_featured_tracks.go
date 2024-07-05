@@ -8,6 +8,7 @@ import (
 	spot "github.com/zmb3/spotify/v2"
 
 	"github.com/mager/occipital/spotify"
+	"github.com/mager/occipital/util"
 	"go.uber.org/zap"
 )
 
@@ -79,10 +80,10 @@ func (h *GetFeaturedTracksHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 		for _, track := range pli.Items {
 			var t FeaturedTrack
 			t.Name = track.Track.Track.Name
-			t.Artist = spotify.GetFirstArtist(track.Track.Track.Artists)
+			t.Artist = util.GetFirstArtist(track.Track.Track.Artists)
 			t.Source = "SPOTIFY"
 			t.SourceID = string(track.Track.Track.ID)
-			t.Image = *getThumb(track.Track.Track.Album)
+			t.Image = *util.GetThumb(track.Track.Track.Album)
 			tracks = append(tracks, t)
 		}
 	}

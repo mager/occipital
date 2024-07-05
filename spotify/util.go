@@ -6,15 +6,6 @@ import (
 	spot "github.com/zmb3/spotify/v2"
 )
 
-// GetFirstArtist returns the first artist
-func GetFirstArtist(artists []spot.SimpleArtist) string {
-	if len(artists) == 0 {
-		return "Various Arists"
-	}
-
-	return artists[0].Name
-}
-
 // ConcatArtists returns a comma-separated list of artist names
 func ConcatArtists(artists []spot.SimpleArtist) string {
 	names := make([]string, len(artists))
