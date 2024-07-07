@@ -8,6 +8,7 @@ import (
 
 	spot "github.com/zmb3/spotify/v2"
 
+	"github.com/mager/occipital/occipital"
 	"github.com/mager/occipital/spotify"
 	"github.com/mager/occipital/util"
 	"go.uber.org/zap"
@@ -37,15 +38,7 @@ type GetTrackRequest struct {
 }
 
 type GetTrackResponse struct {
-	Track Track `json:"track"`
-}
-
-type Track struct {
-	Artist   string `json:"artist"`
-	Name     string `json:"name"`
-	SourceID string `json:"source_id"`
-	Source   string `json:"source"`
-	Image    string `json:"image"`
+	Track occipital.Track `json:"track"`
 }
 
 // Get track
@@ -62,22 +55,71 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	sourceId := q.Get("sourceId")
 	source := q.Get("source")
 
-	t, err := h.spotifyClient.Client.GetTrack(ctx, spot.ID(sourceId))
+	var resp GetTrackResponse
+	var err error
+
+	// Channels for receiving results
+	trackChan := make(chan *spot.FullTrack, 1)
+	audioFeaturesChan := make(chan []*spot.AudioFeatures, 1)
+	// Fetch track asynchronously
+	go func() {
+		var t *spot.FullTrack
+		t, err = h.spotifyClient.Client.GetTrack(ctx, spot.ID(sourceId))
+		trackChan <- t
+		if err != nil {
+			h.log.Sugar().Errorf("error fetching track: %v", err)
+		}
+	}()
+
+	// Fetch audio features asynchronously
+	go func() {
+		var audioFeatures []*spot.AudioFeatures
+		audioFeatures, err = h.spotifyClient.Client.GetAudioFeatures(ctx, spot.ID(sourceId))
+		audioFeaturesChan <- audioFeatures
+		if err != nil {
+			h.log.Sugar().Errorf("error fetching audio features: %v", err)
+		}
+	}()
+
+	// Receive track and audio features
+	t := <-trackChan
+	audioFeatures := <-audioFeaturesChan
+
+	// Check for errors
 	if err != nil {
-		http.Error(w, "featured playlist error: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "track fetch error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	h.log.Sugar().Infow("req", zap.String("sourceId", sourceId), zap.String("source", source))
-	h.log.Sugar().Infow("resp", zap.Any("t", t))
 
-	var resp GetTrackResponse
-	var track Track
+	var track occipital.Track
 
 	track.Name = t.Name
 	track.Artist = util.GetFirstArtist(t.Artists)
 	track.SourceID = sourceId
 	track.Source = source
 	track.Image = *util.GetThumb(t.Album)
+
+	if audioFeatures == nil || (len(audioFeatures) == 0 || len(audioFeatures) > 1) {
+		h.log.Sugar().Warn("Error getting audio features", zap.Int("len_features", len(audioFeatures)))
+	} else {
+		af := audioFeatures[0]
+		f := &occipital.TrackFeatures{
+			Acousticness:     af.Acousticness,
+			Danceability:     af.Danceability,
+			DurationMs:       int(af.Duration),
+			Energy:           af.Energy,
+			Instrumentalness: af.Instrumentalness,
+			Key:              int(af.Key),
+			Liveness:         af.Liveness,
+			Loudness:         af.Loudness,
+			Mode:             int(af.Mode),
+			Speechiness:      af.Speechiness,
+			Tempo:            af.Tempo,
+			TimeSignature:    int(af.TimeSignature),
+			Valence:          af.Valence,
+		}
+		track.Features = f
+	}
 
 	resp.Track = track
 

@@ -26,3 +26,9 @@ func GetFirstArtist(artists []spot.SimpleArtist) string {
 
 	return artists[0].Name
 }
+
+func GetGenresForArtists(artists []spot.SimpleArtist) []string {
+	// TODO: Get most common genres
+	genres := make([]string, 0, 3)
+	return genres
+}
