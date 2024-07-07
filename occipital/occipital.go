@@ -12,6 +12,8 @@ type Track struct {
 	ReleaseDate string `json:"release_date"`
 
 	Genres []string `json:"genres"`
+
+	ISRC string `json:"isrc"`
 }
 
 type TrackFeatures struct {

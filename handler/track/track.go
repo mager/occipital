@@ -132,6 +132,8 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	track.Genres = util.GetGenresForArtists(artists)
 
+	track.ISRC = *util.GetISRC(t)
+
 	resp.Track = track
 
 	json.NewEncoder(w).Encode(resp)

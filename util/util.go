@@ -4,7 +4,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/kr/pretty"
 	spot "github.com/zmb3/spotify/v2"
 	"golang.org/x/exp/maps"
 )
@@ -38,9 +37,6 @@ func GetReleaseDate(album spot.SimpleAlbum) *string {
 
 // GetGenresForArtists returns the most common genres among the given artists, ranked by their number of occurrences
 func GetGenresForArtists(artists []*spot.FullArtist) []string {
-	pretty.Print("artists")
-	pretty.Print(artists)
-
 	allGenres := make(map[string]int) // Use a map to count genres directly
 
 	for _, artist := range artists {
@@ -63,4 +59,12 @@ func GetGenresForArtists(artists []*spot.FullArtist) []string {
 	})
 
 	return sorted
+}
+
+func GetISRC(track *spot.FullTrack) *string {
+	if isrc, ok := track.ExternalIDs["isrc"]; ok {
+		return &isrc
+	}
+
+	return nil
 }
