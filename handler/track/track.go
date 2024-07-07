@@ -3,7 +3,6 @@ package track
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 
 	spot "github.com/zmb3/spotify/v2"
@@ -21,7 +20,7 @@ type GetTrackHandler struct {
 }
 
 func (*GetTrackHandler) Pattern() string {
-	return fmt.Sprintf("/track")
+	return "/track"
 }
 
 // NewGetTrackHandler builds a new GetTrackHandler.
@@ -92,13 +91,13 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var track occipital.Track
-
 	track.Name = t.Name
 	track.Artist = util.GetFirstArtist(t.Artists)
 	track.SourceID = sourceId
 	track.Source = source
 	track.Image = *util.GetThumb(t.Album)
 
+	// Audio features
 	if audioFeatures == nil || (len(audioFeatures) == 0 || len(audioFeatures) > 1) {
 		h.log.Sugar().Warn("Error getting audio features", zap.Int("len_features", len(audioFeatures)))
 	} else {
@@ -108,6 +107,7 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Danceability:     af.Danceability,
 			DurationMs:       int(af.Duration),
 			Energy:           af.Energy,
+			Happiness:        af.Valence,
 			Instrumentalness: af.Instrumentalness,
 			Key:              int(af.Key),
 			Liveness:         af.Liveness,
@@ -116,10 +116,21 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Speechiness:      af.Speechiness,
 			Tempo:            af.Tempo,
 			TimeSignature:    int(af.TimeSignature),
-			Valence:          af.Valence,
 		}
 		track.Features = f
 	}
+
+	track.ReleaseDate = *util.GetReleaseDate(t.Album)
+
+	artistIDs := make([]spot.ID, len(t.Artists))
+	for _, artist := range t.Artists {
+		artistIDs = append(artistIDs, spot.ID(artist.ID))
+	}
+	artists, err := h.spotifyClient.Client.GetArtists(ctx, artistIDs...)
+	if err != nil {
+		h.log.Sugar().Errorf("error fetching artist: %v", err)
+	}
+	track.Genres = util.GetGenresForArtists(artists)
 
 	resp.Track = track
 

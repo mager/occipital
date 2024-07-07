@@ -6,10 +6,12 @@ toolchain go1.22.4
 
 require (
 	github.com/kelseyhightower/envconfig v1.4.0
+	github.com/kr/pretty v0.3.1
 	github.com/swaggo/swag v1.16.3
 	github.com/zmb3/spotify/v2 v2.4.2
 	go.uber.org/fx v1.22.0
 	go.uber.org/zap v1.26.0
+	golang.org/x/exp v0.0.0-20240613232115-7f521ea00fb8
 	golang.org/x/oauth2 v0.0.0-20210810183815-faf39c7919d5
 )
 
@@ -21,7 +23,9 @@ require (
 	github.com/go-openapi/swag v0.23.0 // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
+	github.com/kr/text v0.2.0 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
+	github.com/rogpeppe/go-internal v1.11.0 // indirect
 	go.uber.org/dig v1.17.1 // indirect
 	go.uber.org/multierr v1.10.0 // indirect
 	golang.org/x/net v0.26.0 // indirect

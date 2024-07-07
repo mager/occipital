@@ -1,7 +1,12 @@
 package util
 
 import (
+	"sort"
+	"strings"
+
+	"github.com/kr/pretty"
 	spot "github.com/zmb3/spotify/v2"
+	"golang.org/x/exp/maps"
 )
 
 func GetThumb(a spot.SimpleAlbum) *string {
@@ -27,8 +32,35 @@ func GetFirstArtist(artists []spot.SimpleArtist) string {
 	return artists[0].Name
 }
 
-func GetGenresForArtists(artists []spot.SimpleArtist) []string {
-	// TODO: Get most common genres
-	genres := make([]string, 0, 3)
-	return genres
+func GetReleaseDate(album spot.SimpleAlbum) *string {
+	return &album.ReleaseDate
+}
+
+// GetGenresForArtists returns the most common genres among the given artists, ranked by their number of occurrences
+func GetGenresForArtists(artists []*spot.FullArtist) []string {
+	pretty.Print("artists")
+	pretty.Print(artists)
+
+	allGenres := make(map[string]int) // Use a map to count genres directly
+
+	for _, artist := range artists {
+		if artist == nil || len(artist.Genres) == 0 {
+			continue
+		}
+		// Split the artist's genres string into individual genres
+		genres := strings.Split(artist.Genres[0], " ")
+		for _, genre := range genres {
+			// Count the occurrences of each genre
+			allGenres[genre]++
+		}
+	}
+
+	// Sort the genres by frequency (merging declaration and assignment)
+	var sorted []string
+	sorted = maps.Keys(allGenres)
+	sort.Slice(sorted, func(i, j int) bool {
+		return allGenres[sorted[i]] > allGenres[sorted[j]]
+	})
+
+	return sorted
 }
