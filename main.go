@@ -71,8 +71,8 @@ func NewHTTPServer(lc fx.Lifecycle, spotifyClient *spotify.SpotifyClient, logger
 	spotifySearchHandler := spotHandler.NewSearchHandler(logger, spotifyClient)
 	mux.Handle(spotifySearchHandler.Pattern(), spotifySearchHandler)
 
-	spotifyGetFeaturedTracksHandler := spotHandler.NewGetFeaturedTracksHandler(logger, spotifyClient)
-	mux.Handle(spotifyGetFeaturedTracksHandler.Pattern(), spotifyGetFeaturedTracksHandler)
+	spotifyRecommendedTracksHandler := spotHandler.NewRecommendedTracksHandler(logger, spotifyClient)
+	mux.Handle(spotifyRecommendedTracksHandler.Pattern(), spotifyRecommendedTracksHandler)
 
 	spotifyGetTrackHandler := trackHandler.NewGetTrackHandler(logger, spotifyClient)
 	mux.Handle(spotifyGetTrackHandler.Pattern(), spotifyGetTrackHandler)
