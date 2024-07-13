@@ -1,15 +1,14 @@
 module github.com/mager/occipital
 
-go 1.21
-
-toolchain go1.22.4
+go 1.22.4
 
 require (
 	github.com/kelseyhightower/envconfig v1.4.0
+	github.com/mager/musicbrainz-go v0.0.3
 	github.com/swaggo/swag v1.16.3
 	github.com/zmb3/spotify/v2 v2.4.2
 	go.uber.org/fx v1.22.0
-	go.uber.org/zap v1.26.0
+	go.uber.org/zap v1.27.0
 	golang.org/x/exp v0.0.0-20240613232115-7f521ea00fb8
 	golang.org/x/oauth2 v0.0.0-20210810183815-faf39c7919d5
 )

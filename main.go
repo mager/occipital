@@ -9,6 +9,7 @@ import (
 	"github.com/mager/occipital/handler/health"
 	spotHandler "github.com/mager/occipital/handler/spotify"
 	trackHandler "github.com/mager/occipital/handler/track"
+	"github.com/mager/occipital/musicbrainz"
 	"github.com/mager/occipital/spotify"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
@@ -37,6 +38,7 @@ func main() {
 		fx.Provide(NewHTTPServer,
 			config.Options,
 			spotify.Options,
+			musicbrainz.Options,
 
 			AsRoute(health.NewHealthHandler),
 
@@ -46,7 +48,12 @@ func main() {
 	).Run()
 }
 
-func NewHTTPServer(lc fx.Lifecycle, spotifyClient *spotify.SpotifyClient, logger *zap.Logger) *http.Server {
+func NewHTTPServer(
+	lc fx.Lifecycle,
+	logger *zap.Logger,
+	spotifyClient *spotify.SpotifyClient,
+	musicbrainzClient *musicbrainz.MusicbrainzClient,
+) *http.Server {
 	mux := http.NewServeMux()
 	srv := &http.Server{Addr: ":8080", Handler: mux}
 	lc.Append(fx.Hook{
@@ -74,7 +81,7 @@ func NewHTTPServer(lc fx.Lifecycle, spotifyClient *spotify.SpotifyClient, logger
 	spotifyRecommendedTracksHandler := spotHandler.NewRecommendedTracksHandler(logger, spotifyClient)
 	mux.Handle(spotifyRecommendedTracksHandler.Pattern(), spotifyRecommendedTracksHandler)
 
-	spotifyGetTrackHandler := trackHandler.NewGetTrackHandler(logger, spotifyClient)
+	spotifyGetTrackHandler := trackHandler.NewGetTrackHandler(logger, spotifyClient, musicbrainzClient)
 	mux.Handle(spotifyGetTrackHandler.Pattern(), spotifyGetTrackHandler)
 
 	return srv

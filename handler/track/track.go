@@ -7,6 +7,8 @@ import (
 
 	spot "github.com/zmb3/spotify/v2"
 
+	mb "github.com/mager/musicbrainz-go/musicbrainz"
+	"github.com/mager/occipital/musicbrainz"
 	"github.com/mager/occipital/occipital"
 	"github.com/mager/occipital/spotify"
 	"github.com/mager/occipital/util"
@@ -15,8 +17,9 @@ import (
 
 // GetTrackHandler is an http.Handler
 type GetTrackHandler struct {
-	log           *zap.Logger
-	spotifyClient *spotify.SpotifyClient
+	log               *zap.Logger
+	spotifyClient     *spotify.SpotifyClient
+	musicbrainzClient *musicbrainz.MusicbrainzClient
 }
 
 func (*GetTrackHandler) Pattern() string {
@@ -24,10 +27,11 @@ func (*GetTrackHandler) Pattern() string {
 }
 
 // NewGetTrackHandler builds a new GetTrackHandler.
-func NewGetTrackHandler(log *zap.Logger, spotifyClient *spotify.SpotifyClient) *GetTrackHandler {
+func NewGetTrackHandler(log *zap.Logger, spotifyClient *spotify.SpotifyClient, musicbrainzClient *musicbrainz.MusicbrainzClient) *GetTrackHandler {
 	return &GetTrackHandler{
-		log:           log,
-		spotifyClient: spotifyClient,
+		log:               log,
+		spotifyClient:     spotifyClient,
+		musicbrainzClient: musicbrainzClient,
 	}
 }
 
@@ -133,8 +137,75 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	track.Genres = util.GetGenresForArtists(artists)
 
 	track.ISRC = *util.GetISRC(t)
+	if track.ISRC != "" {
+		// Call Musicbrainz to get the list of instruments for the track
+		searchRecsReq := mb.SearchRecordingsByISRCRequest{
+			ISRC: track.ISRC,
+		}
+		recs, err := h.musicbrainzClient.Client.SearchRecordingsByISRC(searchRecsReq)
+		if err != nil {
+			h.log.Sugar().Errorf("error fetching recordings: %v", err)
+		}
+		// If there is a single recording, fetch it
+		if recs.Count == 1 {
+			getRecReq := mb.GetRecordingRequest{
+				ID:       recs.Recordings[0].ID,
+				Includes: []mb.Include{"artist-rels"},
+			}
+			rec, err := h.musicbrainzClient.Client.GetRecording(getRecReq)
+			if err != nil {
+				h.log.Sugar().Errorf("error fetching recording: %v", err)
+			}
+			h.log.Sugar().Infow("got recording", "ID", rec.ID)
+
+			// Get instruments for track
+			track.Instruments = getInstrumentsForRecording(rec.Recording)
+		}
+	}
 
 	resp.Track = track
 
 	json.NewEncoder(w).Encode(resp)
+}
+
+func getInstrumentsForRecording(rec mb.Recording) []*occipital.TrackInstrument {
+	// Use a map to store instruments with their artists
+	instrumentMap := make(map[string][]string)
+
+	// Iterate through each relation
+	for _, relation := range *rec.Relations {
+		if relation.Type == "instrument" && len(relation.Attributes) == 1 {
+			// Get instrument name and artist name
+			instrumentName := relation.Attributes[0]
+			artistName := relation.Artist.Name
+
+			// Add artist to instrument map
+			if _, ok := instrumentMap[instrumentName]; !ok {
+				instrumentMap[instrumentName] = []string{artistName}
+			} else {
+				// Check if artist already exists for this instrument
+				found := false
+				for _, artist := range instrumentMap[instrumentName] {
+					if artist == artistName {
+						found = true
+						break
+					}
+				}
+				if !found {
+					instrumentMap[instrumentName] = append(instrumentMap[instrumentName], artistName)
+				}
+			}
+		}
+	}
+
+	// Convert instrumentMap to []*occipital.TrackInstrument
+	ins := make([]*occipital.TrackInstrument, 0, len(instrumentMap))
+	for instrumentName, artists := range instrumentMap {
+		ins = append(ins, &occipital.TrackInstrument{
+			Name:    instrumentName,
+			Artists: artists,
+		})
+	}
+
+	return ins
 }

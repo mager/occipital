@@ -14,6 +14,8 @@ type Track struct {
 	Genres []string `json:"genres"`
 
 	ISRC string `json:"isrc"`
+
+	Instruments []*TrackInstrument `json:"instruments"`
 }
 
 type TrackFeatures struct {
@@ -75,4 +77,9 @@ type TrackFeatures struct {
 	// Range: 3 - 7
 	// Example: 4
 	TimeSignature int `json:"time_signature"`
+}
+
+type TrackInstrument struct {
+	Name    string   `json:"name"`
+	Artists []string `json:"artists"`
 }
