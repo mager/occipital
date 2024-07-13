@@ -167,10 +167,15 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	json.NewEncoder(w).Encode(resp)
 }
-
 func getInstrumentsForRecording(rec mb.Recording) []*occipital.TrackInstrument {
 	// Use a map to store instruments with their artists
 	instrumentMap := make(map[string][]string)
+
+	// Define instrument mappings for merging
+	instrumentMappings := map[string]string{
+		"bass guitar":      "bass",
+		"drums (drum set)": "drums",
+	}
 
 	// Iterate through each relation
 	for _, relation := range *rec.Relations {
@@ -178,6 +183,12 @@ func getInstrumentsForRecording(rec mb.Recording) []*occipital.TrackInstrument {
 			// Get instrument name and artist name
 			instrumentName := relation.Attributes[0]
 			artistName := relation.Artist.Name
+
+			// Check if there's a mapping for the instrument
+			mappedInstrumentName, ok := instrumentMappings[instrumentName]
+			if ok {
+				instrumentName = mappedInstrumentName
+			}
 
 			// Add artist to instrument map
 			if _, ok := instrumentMap[instrumentName]; !ok {
