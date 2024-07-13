@@ -4,7 +4,7 @@ go 1.22.4
 
 require (
 	github.com/kelseyhightower/envconfig v1.4.0
-	github.com/mager/musicbrainz-go v0.0.3
+	github.com/mager/musicbrainz-go v0.0.4
 	github.com/swaggo/swag v1.16.3
 	github.com/zmb3/spotify/v2 v2.4.2
 	go.uber.org/fx v1.22.0
