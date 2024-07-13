@@ -59,7 +59,7 @@ func (h *RecommendedTracksHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	tracks := make([]occipital.Track, 0, 24)
+	tracks := make([]occipital.Track, 0, 48)
 	for _, track := range recs.Tracks {
 		var t occipital.Track
 		t.Name = track.Name

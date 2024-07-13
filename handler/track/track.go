@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sort"
 
 	spot "github.com/zmb3/spotify/v2"
 
@@ -150,7 +151,7 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if recs.Count == 1 {
 			getRecReq := mb.GetRecordingRequest{
 				ID:       recs.Recordings[0].ID,
-				Includes: []mb.Include{"artist-rels"},
+				Includes: []mb.Include{"artist-rels", "genres"},
 			}
 			rec, err := h.musicbrainzClient.Client.GetRecording(getRecReq)
 			if err != nil {
@@ -160,6 +161,9 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 			// Get instruments for track
 			track.Instruments = getInstrumentsForRecording(rec.Recording)
+
+			// Get genres for track
+			track.Genres = getGenresForRecording(rec.Recording)
 		}
 	}
 
@@ -219,4 +223,26 @@ func getInstrumentsForRecording(rec mb.Recording) []*occipital.TrackInstrument {
 	}
 
 	return ins
+}
+
+func getGenresForRecording(rec mb.Recording) []string {
+	maxGenres := 3
+	genres := make([]string, 0, maxGenres)
+
+	if rec.Genres != nil && len(*rec.Genres) > 0 {
+		// Dereference the pointer before sorting
+		genresSlice := *rec.Genres
+
+		// Sort genres by Count in descending order
+		sort.Slice(genresSlice, func(i, j int) bool {
+			return genresSlice[i].Count > genresSlice[j].Count
+		})
+
+		// Add genres with the highest counts, up to the max limit
+		for i := 0; i < maxGenres && i < len(genresSlice); i++ {
+			genres = append(genres, genresSlice[i].Name)
+		}
+	}
+
+	return genres
 }
