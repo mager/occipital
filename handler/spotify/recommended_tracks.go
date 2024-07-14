@@ -50,8 +50,15 @@ func (h *RecommendedTracksHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 	w.Header().Set("Content-Type", "application/json")
 
 	ctx := context.Background()
+	// Default "hot" query
 	seeds := spot.Seeds{
-		Genres: []string{"pop"},
+		Genres: []string{
+			"hip-hop",
+			"pop",
+			"rock",
+			"electronic",
+			"indie",
+		},
 	}
 	recs, err := h.spotifyClient.Client.GetRecommendations(ctx, seeds, nil, spot.Limit(48))
 	if err != nil {

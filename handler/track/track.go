@@ -24,6 +24,7 @@ var (
 		"percussion":       "drums",
 		"acoustic guitar":  "guitar",
 		"electric guitar":  "guitar",
+		"foot stomps":      "foot-stomps",
 	}
 	instrumentRankings = map[string]int{
 		"piano":    1,
