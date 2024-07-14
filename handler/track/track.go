@@ -276,8 +276,11 @@ func getArtistInstrumentsForRecording(rec mb.Recording) []*occipital.TrackArtist
 	// Convert artistInstrumentMap to []*TrackArtistInstruments
 	artistInstruments := make([]*occipital.TrackArtistInstruments, 0, len(artistInstrumentMap))
 	for artistName, instruments := range artistInstrumentMap {
+		// Sort the instruments alphabetically
+		sort.Strings(instruments)
+
 		// Sort the instruments based on the predefined rankings
-		sort.Slice(instruments, func(i, j int) bool {
+		sort.SliceStable(instruments, func(i, j int) bool {
 			rankI, okI := instrumentRankings[instruments[i]]
 			rankJ, okJ := instrumentRankings[instruments[j]]
 			if !okI {
