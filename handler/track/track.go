@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"sort"
+	"strings"
 
 	spot "github.com/zmb3/spotify/v2"
 
@@ -14,6 +15,23 @@ import (
 	"github.com/mager/occipital/spotify"
 	"github.com/mager/occipital/util"
 	"go.uber.org/zap"
+)
+
+var (
+	instrumentMappings = map[string]string{
+		"bass guitar":      "bass",
+		"drums (drum set)": "drums",
+		"percussion":       "drums",
+		"acoustic guitar":  "guitar",
+		"electric guitar":  "guitar",
+	}
+	instrumentRankings = map[string]int{
+		"piano":    1,
+		"guitar":   2,
+		"bass":     3,
+		"keyboard": 4,
+		"drums":    5,
+	}
 )
 
 // GetTrackHandler is an http.Handler
@@ -160,7 +178,7 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.log.Sugar().Infow("got recording", "ID", rec.ID)
 
 			// Get instruments for track
-			track.Instruments = getInstrumentsForRecording(rec.Recording)
+			track.Instruments = getArtistInstrumentsForRecording(rec.Recording)
 
 			// Get genres for track
 			track.Genres = getGenresForRecording(rec.Recording)
@@ -171,15 +189,11 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	json.NewEncoder(w).Encode(resp)
 }
+
+// DEPRECATED
 func getInstrumentsForRecording(rec mb.Recording) []*occipital.TrackInstrument {
 	// Use a map to store instruments with their artists
 	instrumentMap := make(map[string][]string)
-
-	// Define instrument mappings for merging
-	instrumentMappings := map[string]string{
-		"bass guitar":      "bass",
-		"drums (drum set)": "drums",
-	}
 
 	// Iterate through each relation
 	for _, relation := range *rec.Relations {
@@ -217,12 +231,75 @@ func getInstrumentsForRecording(rec mb.Recording) []*occipital.TrackInstrument {
 	ins := make([]*occipital.TrackInstrument, 0, len(instrumentMap))
 	for instrumentName, artists := range instrumentMap {
 		ins = append(ins, &occipital.TrackInstrument{
-			Name:    instrumentName,
+			Name:    strings.ToLower(instrumentName),
 			Artists: artists,
 		})
 	}
 
 	return ins
+}
+
+func getArtistInstrumentsForRecording(rec mb.Recording) []*occipital.TrackArtistInstruments {
+	artistInstrumentMap := make(map[string][]string)
+
+	for _, relation := range *rec.Relations {
+		if relation.Type == "instrument" && len(relation.Attributes) == 1 {
+			// Get instrument name and artist name
+			instrumentName := relation.Attributes[0]
+			artistName := relation.Artist.Name
+
+			// Check if there's a mapping for the instrument
+			if mappedInstrumentName, ok := instrumentMappings[instrumentName]; ok {
+				instrumentName = mappedInstrumentName
+			}
+
+			// Add instrument to artist map
+			if _, ok := artistInstrumentMap[artistName]; !ok {
+				artistInstrumentMap[artistName] = []string{instrumentName}
+			} else {
+				// Check if instrument already exists for this artist
+				found := false
+				for _, instrument := range artistInstrumentMap[artistName] {
+					if instrument == instrumentName {
+						found = true
+						break
+					}
+				}
+				if !found {
+					artistInstrumentMap[artistName] = append(artistInstrumentMap[artistName], instrumentName)
+				}
+			}
+		}
+	}
+
+	// Convert artistInstrumentMap to []*TrackArtistInstruments
+	artistInstruments := make([]*occipital.TrackArtistInstruments, 0, len(artistInstrumentMap))
+	for artistName, instruments := range artistInstrumentMap {
+		// Sort the instruments based on the predefined rankings
+		sort.Slice(instruments, func(i, j int) bool {
+			rankI, okI := instrumentRankings[instruments[i]]
+			rankJ, okJ := instrumentRankings[instruments[j]]
+			if !okI {
+				rankI = len(instrumentRankings) + 1
+			}
+			if !okJ {
+				rankJ = len(instrumentRankings) + 1
+			}
+			return rankI < rankJ
+		})
+
+		artistInstruments = append(artistInstruments, &occipital.TrackArtistInstruments{
+			Artist:      artistName,
+			Instruments: instruments,
+		})
+	}
+
+	// Sort artists by the number of instruments they play
+	sort.Slice(artistInstruments, func(i, j int) bool {
+		return len(artistInstruments[i].Instruments) > len(artistInstruments[j].Instruments)
+	})
+
+	return artistInstruments
 }
 
 func getGenresForRecording(rec mb.Recording) []string {

@@ -15,7 +15,7 @@ type Track struct {
 
 	ISRC string `json:"isrc"`
 
-	Instruments []*TrackInstrument `json:"instruments"`
+	Instruments []*TrackArtistInstruments `json:"instruments"`
 }
 
 type TrackFeatures struct {
@@ -82,4 +82,9 @@ type TrackFeatures struct {
 type TrackInstrument struct {
 	Name    string   `json:"name"`
 	Artists []string `json:"artists"`
+}
+
+type TrackArtistInstruments struct {
+	Artist      string   `json:"artist"`
+	Instruments []string `json:"instruments"`
 }
