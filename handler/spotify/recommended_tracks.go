@@ -53,7 +53,7 @@ func (h *RecommendedTracksHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 	seeds := spot.Seeds{
 		Genres: []string{"pop"},
 	}
-	recs, err := h.spotifyClient.Client.GetRecommendations(ctx, seeds, nil, spot.Limit(10))
+	recs, err := h.spotifyClient.Client.GetRecommendations(ctx, seeds, nil, spot.Limit(48))
 	if err != nil {
 		http.Error(w, "featured playlist error: "+err.Error(), http.StatusInternalServerError)
 		return
