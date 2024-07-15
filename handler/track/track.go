@@ -19,13 +19,15 @@ import (
 
 var (
 	instrumentMappings = map[string]string{
-		"electric bass guitar": "bass",
-		"bass guitar":          "bass",
-		"drums (drum set)":     "drums",
-		"percussion":           "drums",
-		"acoustic guitar":      "guitar",
-		"electric guitar":      "guitar",
-		"foot stomps":          "foot-stomps",
+		"electric bass guitar":     "bass",
+		"bass guitar":              "bass",
+		"drums (drum set)":         "drums",
+		"percussion":               "drums",
+		"acoustic guitar":          "guitar",
+		"electric guitar":          "guitar",
+		"foot stomps":              "foot-stomps",
+		"Wurlitzer electric piano": "wurlitzer",
+		"Rhodes piano":             "piano",
 	}
 	instrumentRankings = map[string]int{
 		"piano":    1,
