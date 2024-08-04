@@ -74,6 +74,8 @@ type GetTrackResponse struct {
 // @Produce json
 // @Success 200 {object} GetTrackResponse
 // @Router /track [get]
+// @Param sourceId query string true "Source ID"
+// @Param source query string true "Source"
 func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 	w.Header().Set("Content-Type", "application/json")

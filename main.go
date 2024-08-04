@@ -9,6 +9,7 @@ import (
 	"github.com/mager/occipital/handler/health"
 	spotHandler "github.com/mager/occipital/handler/spotify"
 	trackHandler "github.com/mager/occipital/handler/track"
+	userHandler "github.com/mager/occipital/handler/user"
 	"github.com/mager/occipital/musicbrainz"
 	"github.com/mager/occipital/spotify"
 	"go.uber.org/fx"
@@ -74,6 +75,9 @@ func NewHTTPServer(
 	// Define handlers
 	healthHandler := health.NewHealthHandler(logger, spotifyClient)
 	mux.Handle(healthHandler.Pattern(), healthHandler)
+
+	userHandler := userHandler.NewUserHandler(logger)
+	mux.Handle(userHandler.Pattern(), userHandler)
 
 	spotifySearchHandler := spotHandler.NewSearchHandler(logger, spotifyClient)
 	mux.Handle(spotifySearchHandler.Pattern(), spotifySearchHandler)
