@@ -7,6 +7,8 @@ import (
 )
 
 type Config struct {
+	DatabaseURL string
+
 	SpotifyID     string
 	SpotifySecret string
 }

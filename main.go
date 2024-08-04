@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"net"
 	"net/http"
 
 	"github.com/mager/occipital/config"
+	"github.com/mager/occipital/database"
 	"github.com/mager/occipital/handler/health"
 	spotHandler "github.com/mager/occipital/handler/spotify"
 	trackHandler "github.com/mager/occipital/handler/track"
@@ -40,8 +42,13 @@ func main() {
 			config.Options,
 			spotify.Options,
 			musicbrainz.Options,
+			database.Options,
 
 			AsRoute(health.NewHealthHandler),
+			AsRoute(userHandler.NewUserHandler),
+			AsRoute(spotHandler.NewSearchHandler),
+			AsRoute(spotHandler.NewRecommendedTracksHandler),
+			AsRoute(trackHandler.NewGetTrackHandler),
 
 			zap.NewProduction,
 		),
@@ -52,6 +59,7 @@ func main() {
 func NewHTTPServer(
 	lc fx.Lifecycle,
 	logger *zap.Logger,
+	db *sql.DB,
 	spotifyClient *spotify.SpotifyClient,
 	musicbrainzClient *musicbrainz.MusicbrainzClient,
 ) *http.Server {
@@ -76,7 +84,7 @@ func NewHTTPServer(
 	healthHandler := health.NewHealthHandler(logger, spotifyClient)
 	mux.Handle(healthHandler.Pattern(), healthHandler)
 
-	userHandler := userHandler.NewUserHandler(logger)
+	userHandler := userHandler.NewUserHandler(logger, db)
 	mux.Handle(userHandler.Pattern(), userHandler)
 
 	spotifySearchHandler := spotHandler.NewSearchHandler(logger, spotifyClient)

@@ -1,6 +1,7 @@
 package health
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
 
@@ -11,6 +12,7 @@ import (
 // back to the response.
 type UserHandler struct {
 	log *zap.Logger
+	db  *sql.DB
 }
 
 func (*UserHandler) Pattern() string {
@@ -18,9 +20,10 @@ func (*UserHandler) Pattern() string {
 }
 
 // NewUserHandler builds a new UserHandler.
-func NewUserHandler(log *zap.Logger) *UserHandler {
+func NewUserHandler(log *zap.Logger, db *sql.DB) *UserHandler {
 	return &UserHandler{
 		log: log,
+		db:  db,
 	}
 }
 
