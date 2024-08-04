@@ -8,6 +8,10 @@ import (
 	"go.uber.org/zap"
 )
 
+type DatabaseUser struct {
+	ID string `json:"id"`
+}
+
 // UserHandler is an http.Handler that copies its request body
 // back to the response.
 type UserHandler struct {
@@ -46,9 +50,24 @@ func (h *UserHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	h.log.Info("get user", zap.String("id", id))
 
-	// Use the ID to fetch user data (replace this with actual logic)
-	resp := GetUserResponse{
-		ID: id,
+	// Fetch the user from the database
+	row := h.db.QueryRow("SELECT id FROM users WHERE id = $1", id)
+
+	var user DatabaseUser
+	err := row.Scan(&user.ID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			h.log.Info("User not found", zap.String("id", id))
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		h.log.Error("Failed to fetch user", zap.Error(err))
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	resp := &GetUserResponse{
+		ID: user.ID,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
