@@ -9,7 +9,8 @@ import (
 )
 
 type DatabaseUser struct {
-	ID string `json:"id"`
+	ID       string `json:"id"`
+	Username string `json:"username"`
 }
 
 // UserHandler is an http.Handler that copies its request body
@@ -32,7 +33,8 @@ func NewUserHandler(log *zap.Logger, db *sql.DB) *UserHandler {
 }
 
 type GetUserResponse struct {
-	ID string `json:"id"`
+	ID       string `json:"id"`
+	Username string `json:"username"`
 }
 
 // Get user by ID
@@ -50,11 +52,15 @@ func (h *UserHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	h.log.Info("get user", zap.String("id", id))
 
-	// Fetch the user from the database
-	row := h.db.QueryRow("SELECT id FROM users WHERE id = $1", id)
+	// Fetch the user and profile from the database
+	query := `
+        SELECT u.id, p.id, p.username, p.bio
+        FROM users u
+    `
+	row := h.db.QueryRow(query, id)
 
 	var user DatabaseUser
-	err := row.Scan(&user.ID)
+	err := row.Scan(&user.ID, &user.Username)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			h.log.Info("User not found", zap.String("id", id))
@@ -67,7 +73,8 @@ func (h *UserHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := &GetUserResponse{
-		ID: user.ID,
+		ID:       user.ID,
+		Username: user.Username,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
