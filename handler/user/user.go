@@ -34,15 +34,24 @@ type UserResponse struct {
 	Username *string `json:"username"`
 }
 
-// Get or update user by ID
-// @Summary Get or update user by ID
-// @Description Get or update user details by user ID
+// GetUser godoc
+// @Summary Get user by ID
+// @Description Get user details by user ID
 // @Accept json
 // @Produce json
-// @Param id path string true "User ID"
-// @Success 200 {object} UserResponse
-// @Router /user [get,put]
 // @Param id query string true "User ID"
+// @Success 200 {object} UserResponse
+// @Router /user [get]
+
+// PutUser godoc
+// @Summary Update user by ID
+// @Description Update user details by user ID
+// @Accept json
+// @Produce json
+// @Param id query string true "User ID"
+// @Param user body database.User true "Updated user information"
+// @Success 200 {object} UserResponse
+// @Router /user [put]
 func (h *UserHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	userID := r.URL.Query().Get("id")
 	if userID == "" {

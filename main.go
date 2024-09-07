@@ -3,9 +3,13 @@ package main
 import (
 	"context"
 	"database/sql"
+	"log"
 	"net"
 	"net/http"
+	"os"
+	"strings"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/mager/occipital/config"
 	"github.com/mager/occipital/database"
 	"github.com/mager/occipital/handler/health"
@@ -65,9 +69,9 @@ func NewHTTPServer(
 ) *http.Server {
 	mux := http.NewServeMux()
 
-	jsonHandler := jsonMiddleware(mux)
-
-	srv := &http.Server{Addr: ":8080", Handler: jsonHandler}
+	handler := jsonMiddleware(mux)
+	handler = authNMiddleware(handler, logger.Sugar())
+	srv := &http.Server{Addr: ":8080", Handler: handler}
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
 			ln, err := net.Listen("tcp", srv.Addr)
@@ -117,4 +121,51 @@ func jsonMiddleware(next http.Handler) http.Handler {
 		w.Header().Add("Content-Type", "application/json")
 		next.ServeHTTP(w, r)
 	})
+}
+
+var (
+	nextSecret = os.Getenv("OCCIPITAL_NEXTAUTHSECRET")
+)
+
+// authNMiddleware authenticates the request
+func authNMiddleware(next http.Handler, logger *zap.SugaredLogger) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		secret := nextSecret
+		tokenString := r.Header.Get("Authorization")
+		if tokenString == "" {
+			logger.Info("Error: No token")
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		tokenString = extractTokenFromHeader(tokenString)
+
+		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+			return []byte(secret), nil
+		})
+		if err != nil {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+			logger.Info("Successful authentication", claims["email"])
+		} else {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// Extracts the token value from the Authorization header
+func extractTokenFromHeader(header string) string {
+	// Split the header value by whitespace
+	split := strings.SplitN(header, " ", 2)
+
+	if len(split) != 2 || strings.ToLower(split[0]) != "bearer" {
+		log.Fatal("Invalid Authorization header format")
+	}
+
+	return split[1]
 }

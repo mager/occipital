@@ -1,8 +1,10 @@
 basePath: /
 definitions:
-  health.GetUserResponse:
+  database.User:
     properties:
       id:
+        type: integer
+      username:
         type: string
     type: object
   occipital.Track:
@@ -185,6 +187,13 @@ definitions:
       track:
         $ref: '#/definitions/occipital.Track'
     type: object
+  user.UserResponse:
+    properties:
+      id:
+        type: integer
+      username:
+        type: string
+    type: object
 host: localhost:8080
 info:
   contact: {}
@@ -252,23 +261,15 @@ paths:
       consumes:
       - application/json
       description: Get track
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/track.GetTrackResponse'
-      summary: Get track
-  /user/{id}:
-    get:
-      consumes:
-      - application/json
-      description: Get user details by user ID
       parameters:
-      - description: User ID
-        in: path
-        name: id
+      - description: Source ID
+        in: query
+        name: sourceId
+        required: true
+        type: string
+      - description: Source
+        in: query
+        name: source
         required: true
         type: string
       produces:
@@ -277,6 +278,31 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/health.GetUserResponse'
-      summary: Get user by ID
+            $ref: '#/definitions/track.GetTrackResponse'
+      summary: Get track
+  /user:
+    put:
+      consumes:
+      - application/json
+      description: Update user details by user ID
+      parameters:
+      - description: User ID
+        in: query
+        name: id
+        required: true
+        type: string
+      - description: Updated user information
+        in: body
+        name: user
+        required: true
+        schema:
+          $ref: '#/definitions/database.User'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/user.UserResponse'
+      summary: Update user by ID
 swagger: "2.0"

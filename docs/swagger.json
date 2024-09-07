@@ -103,6 +103,22 @@
                     "application/json"
                 ],
                 "summary": "Get track",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Source ID",
+                        "name": "sourceId",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Source",
+                        "name": "source",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -113,30 +129,39 @@
                 }
             }
         },
-        "/user/{id}": {
-            "get": {
-                "description": "Get user details by user ID",
+        "/user": {
+            "put": {
+                "description": "Update user details by user ID",
                 "consumes": [
                     "application/json"
                 ],
                 "produces": [
                     "application/json"
                 ],
-                "summary": "Get user by ID",
+                "summary": "Update user by ID",
                 "parameters": [
                     {
                         "type": "string",
                         "description": "User ID",
                         "name": "id",
-                        "in": "path",
+                        "in": "query",
                         "required": true
+                    },
+                    {
+                        "description": "Updated user information",
+                        "name": "user",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/database.User"
+                        }
                     }
                 ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/health.GetUserResponse"
+                            "$ref": "#/definitions/user.UserResponse"
                         }
                     }
                 }
@@ -144,10 +169,13 @@
         }
     },
     "definitions": {
-        "health.GetUserResponse": {
+        "database.User": {
             "type": "object",
             "properties": {
                 "id": {
+                    "type": "integer"
+                },
+                "username": {
                     "type": "string"
                 }
             }
@@ -350,6 +378,17 @@
             "properties": {
                 "track": {
                     "$ref": "#/definitions/occipital.Track"
+                }
+            }
+        },
+        "user.UserResponse": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "integer"
+                },
+                "username": {
+                    "type": "string"
                 }
             }
         }
