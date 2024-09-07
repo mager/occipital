@@ -1,17 +1,14 @@
-package health
+package user
 
 import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"strconv"
 
+	"github.com/mager/occipital/database"
 	"go.uber.org/zap"
 )
-
-type DatabaseUser struct {
-	ID       string `json:"id"`
-	Username string `json:"username"`
-}
 
 // UserHandler is an http.Handler that copies its request body
 // back to the response.
@@ -32,51 +29,116 @@ func NewUserHandler(log *zap.Logger, db *sql.DB) *UserHandler {
 	}
 }
 
-type GetUserResponse struct {
-	ID       string `json:"id"`
-	Username string `json:"username"`
+type UserResponse struct {
+	ID       int     `json:"id"`
+	Username *string `json:"username"`
 }
 
-// Get user by ID
-// @Summary Get user by ID
-// @Description Get user details by user ID
+// Get or update user by ID
+// @Summary Get or update user by ID
+// @Description Get or update user details by user ID
 // @Accept json
 // @Produce json
 // @Param id path string true "User ID"
-// @Success 200 {object} GetUserResponse
-// @Router /user [get]
+// @Success 200 {object} UserResponse
+// @Router /user [get,put]
 // @Param id query string true "User ID"
 func (h *UserHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	id := q.Get("id")
+	userID := r.URL.Query().Get("id")
+	if userID == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
 
-	h.log.Info("get user", zap.String("id", id))
+	if r.Method == http.MethodGet {
+		h.getUser(w, r)
+	} else if r.Method == http.MethodPut {
+		h.updateUser(w, r)
+	} else {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
 
-	// Fetch the user and profile from the database
+func (h *UserHandler) getUser(w http.ResponseWriter, r *http.Request) {
+	userID := r.URL.Query().Get("id")
 	query := `
-        SELECT u.id, p.id, p.username, p.bio
-        FROM users u
-    `
-	row := h.db.QueryRow(query, id)
+        SELECT id, username
+        FROM users
+		WHERE id = $1
+	`
+	row := h.db.QueryRow(query, userID)
 
-	var user DatabaseUser
+	var user database.User
 	err := row.Scan(&user.ID, &user.Username)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			h.log.Info("User not found", zap.String("id", id))
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
 		h.log.Error("Failed to fetch user", zap.Error(err))
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-
-	resp := &GetUserResponse{
+	w.WriteHeader(http.StatusOK)
+	resp := UserResponse{
 		ID:       user.ID,
 		Username: user.Username,
 	}
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		h.log.Error("Failed to encode response", zap.Error(err))
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+func (h *UserHandler) updateUser(w http.ResponseWriter, r *http.Request) {
+	userID := r.URL.Query().Get("id")
+	body := r.Body
+
+	var user database.User
+	err := json.NewDecoder(body).Decode(&user)
+	if err != nil {
+		h.log.Error("Failed to parse request body", zap.Error(err))
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	query := `
+        UPDATE users
+        SET username = $1
+        WHERE id = $2
+	`
+	result, err := h.db.Exec(query, user.Username, userID)
+	if err != nil {
+		h.log.Error("Failed to execute update query", zap.Error(err))
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		h.log.Error("Failed to get rows affected", zap.Error(err))
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	if rowsAffected == 0 {
+		h.log.Warn("No user found with the given ID", zap.String("userID", userID))
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	userIDInt, err := strconv.Atoi(userID)
+	if err != nil {
+		h.log.Error("Failed to convert userID to int", zap.Error(err))
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	resp := UserResponse{
+		ID:       userIDInt,
+		Username: user.Username,
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		h.log.Error("Failed to encode response", zap.Error(err))
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 }

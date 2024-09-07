@@ -64,7 +64,10 @@ func NewHTTPServer(
 	musicbrainzClient *musicbrainz.MusicbrainzClient,
 ) *http.Server {
 	mux := http.NewServeMux()
-	srv := &http.Server{Addr: ":8080", Handler: mux}
+
+	jsonHandler := jsonMiddleware(mux)
+
+	srv := &http.Server{Addr: ":8080", Handler: jsonHandler}
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
 			ln, err := net.Listen("tcp", srv.Addr)
@@ -107,4 +110,11 @@ func AsRoute(f any) any {
 		fx.As(new(Route)),
 		fx.ResultTags(`group:"routes"`),
 	)
+}
+
+func jsonMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("Content-Type", "application/json")
+		next.ServeHTTP(w, r)
+	})
 }
