@@ -70,7 +70,7 @@ func NewHTTPServer(
 	mux := http.NewServeMux()
 
 	handler := jsonMiddleware(mux)
-	handler = authNMiddleware(handler, logger.Sugar())
+	// handler = authNMiddleware(handler, logger.Sugar())
 	srv := &http.Server{Addr: ":8080", Handler: handler}
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {

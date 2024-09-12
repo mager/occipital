@@ -34,6 +34,7 @@ func NewSearchHandler(log *zap.Logger, spotifyClient *spotify.SpotifyClient) *Se
 
 type SearchRequest struct {
 	Query string `json:"query"`
+	Limit int    `json:"limit"`
 }
 
 type SearchResponse struct {

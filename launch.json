@@ -1,0 +1,14 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Launch Go Program",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/main.go", // or "${file}" if you want to run the current file
+      "args": [], // any command line arguments to pass to your program
+      "showLog": true
+    }
+  ]
+}

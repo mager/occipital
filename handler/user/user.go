@@ -3,6 +3,8 @@ package user
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 
@@ -98,10 +100,21 @@ func (h *UserHandler) getUser(w http.ResponseWriter, r *http.Request) {
 
 func (h *UserHandler) updateUser(w http.ResponseWriter, r *http.Request) {
 	userID := r.URL.Query().Get("id")
-	body := r.Body
 
+	// Read the request body
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		h.log.Error("Failed to read request body", zap.Error(err))
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	// Print the body for debugging
+	fmt.Printf("Request body: %s\n", string(body))
+
+	// Decode the body into the user struct
 	var user database.User
-	err := json.NewDecoder(body).Decode(&user)
+	err = json.Unmarshal(body, &user)
 	if err != nil {
 		h.log.Error("Failed to parse request body", zap.Error(err))
 		w.WriteHeader(http.StatusBadRequest)
