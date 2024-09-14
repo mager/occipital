@@ -3,7 +3,6 @@ package user
 import (
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -108,9 +107,6 @@ func (h *UserHandler) updateUser(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-
-	// Print the body for debugging
-	fmt.Printf("Request body: %s\n", string(body))
 
 	// Decode the body into the user struct
 	var user database.User
