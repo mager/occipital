@@ -38,6 +38,42 @@ type RecommendedTracksResponse struct {
 	Tracks []occipital.Track `json:"tracks"`
 }
 
+var (
+	genreMap = map[string]spot.Seeds{
+		// Special genres (combine)
+		"hot": {
+			Genres: []string{
+				"hip-hop",
+				"pop",
+				"rock",
+				"electronic",
+				"indie",
+			},
+		},
+		// Regular genres
+		"pop": {
+			Genres: []string{
+				"pop",
+			},
+		},
+		"country": {
+			Genres: []string{
+				"country",
+			},
+		},
+		"electronic": {
+			Genres: []string{
+				"electronic",
+			},
+		},
+		"hip-hop": {
+			Genres: []string{
+				"hip-hop",
+			},
+		},
+	}
+)
+
 // Get recommended tracks on Spotify
 // @Summary Get recommended tracks on Spotify
 // @Description Get the top featured tracks on Spotify
@@ -49,17 +85,11 @@ type RecommendedTracksResponse struct {
 func (h *RecommendedTracksHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
+	q := r.URL.Query()
+	genre := q.Get("genre")
+
 	ctx := context.Background()
-	// Default "hot" query
-	seeds := spot.Seeds{
-		Genres: []string{
-			"hip-hop",
-			"pop",
-			"rock",
-			"electronic",
-			"indie",
-		},
-	}
+	seeds := genreMap[genre]
 	recs, err := h.spotifyClient.Client.GetRecommendations(ctx, seeds, nil, spot.Limit(48))
 	if err != nil {
 		http.Error(w, "featured playlist error: "+err.Error(), http.StatusInternalServerError)
