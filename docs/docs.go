@@ -19,6 +19,35 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/profile": {
+            "get": {
+                "description": "Get profile details by user ID",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "summary": "Get profile by ID",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "User ID",
+                        "name": "id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/profile.ProfileResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/spotify/get_featured_tracks": {
             "get": {
                 "description": "Get the top featured tracks on Spotify",
@@ -43,7 +72,7 @@ const docTemplate = `{
             }
         },
         "/spotify/recommended_tracks": {
-            "get": {
+            "post": {
                 "description": "Get the top featured tracks on Spotify",
                 "consumes": [
                     "application/json"
@@ -298,6 +327,17 @@ const docTemplate = `{
                 }
             }
         },
+        "profile.ProfileResponse": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "integer"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
         "spotify.FeaturedTrack": {
             "type": "object",
             "properties": {
@@ -343,6 +383,9 @@ const docTemplate = `{
         "spotify.SearchRequest": {
             "type": "object",
             "properties": {
+                "limit": {
+                    "type": "integer"
+                },
                 "query": {
                     "type": "string"
                 }

@@ -10,9 +10,11 @@ import (
 	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/gorilla/mux"
 	"github.com/mager/occipital/config"
 	"github.com/mager/occipital/database"
 	"github.com/mager/occipital/handler/health"
+	profileHandler "github.com/mager/occipital/handler/profile"
 	spotHandler "github.com/mager/occipital/handler/spotify"
 	trackHandler "github.com/mager/occipital/handler/track"
 	userHandler "github.com/mager/occipital/handler/user"
@@ -50,6 +52,7 @@ func main() {
 
 			AsRoute(health.NewHealthHandler),
 			AsRoute(userHandler.NewUserHandler),
+			AsRoute(profileHandler.NewProfileHandler),
 			AsRoute(spotHandler.NewSearchHandler),
 			AsRoute(spotHandler.NewRecommendedTracksHandler),
 			AsRoute(trackHandler.NewGetTrackHandler),
@@ -67,11 +70,10 @@ func NewHTTPServer(
 	spotifyClient *spotify.SpotifyClient,
 	musicbrainzClient *musicbrainz.MusicbrainzClient,
 ) *http.Server {
-	mux := http.NewServeMux()
+	router := mux.NewRouter()
 
-	handler := jsonMiddleware(mux)
-	// handler = authNMiddleware(handler, logger.Sugar())
-	srv := &http.Server{Addr: ":8080", Handler: handler}
+	router.Use(jsonMiddleware)
+	srv := &http.Server{Addr: ":8080", Handler: router}
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
 			ln, err := net.Listen("tcp", srv.Addr)
@@ -89,19 +91,22 @@ func NewHTTPServer(
 
 	// Define handlers
 	healthHandler := health.NewHealthHandler(logger, spotifyClient)
-	mux.Handle(healthHandler.Pattern(), healthHandler)
+	router.Handle(healthHandler.Pattern(), healthHandler)
 
 	userHandler := userHandler.NewUserHandler(logger, db)
-	mux.Handle(userHandler.Pattern(), userHandler)
+	router.Handle(userHandler.Pattern(), authNMiddleware(userHandler, logger))
+
+	profileHandler := profileHandler.NewProfileHandler(logger, db)
+	router.Handle(profileHandler.Pattern(), profileHandler)
 
 	spotifySearchHandler := spotHandler.NewSearchHandler(logger, spotifyClient)
-	mux.Handle(spotifySearchHandler.Pattern(), spotifySearchHandler)
+	router.Handle(spotifySearchHandler.Pattern(), spotifySearchHandler)
 
 	spotifyRecommendedTracksHandler := spotHandler.NewRecommendedTracksHandler(logger, spotifyClient)
-	mux.Handle(spotifyRecommendedTracksHandler.Pattern(), spotifyRecommendedTracksHandler)
+	router.Handle(spotifyRecommendedTracksHandler.Pattern(), spotifyRecommendedTracksHandler)
 
 	spotifyGetTrackHandler := trackHandler.NewGetTrackHandler(logger, spotifyClient, musicbrainzClient)
-	mux.Handle(spotifyGetTrackHandler.Pattern(), spotifyGetTrackHandler)
+	router.Handle(spotifyGetTrackHandler.Pattern(), spotifyGetTrackHandler)
 
 	return srv
 }
@@ -128,7 +133,7 @@ var (
 )
 
 // authNMiddleware authenticates the request
-func authNMiddleware(next http.Handler, logger *zap.SugaredLogger) http.Handler {
+func authNMiddleware(next http.Handler, logger *zap.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		secret := nextSecret
 		tokenString := r.Header.Get("Authorization")
@@ -148,7 +153,7 @@ func authNMiddleware(next http.Handler, logger *zap.SugaredLogger) http.Handler 
 		}
 
 		if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-			logger.Info("Successful authentication", claims["email"])
+			logger.Sugar().Infow("Successful authentication", "email", claims["email"])
 		} else {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
