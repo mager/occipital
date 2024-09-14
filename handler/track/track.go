@@ -131,20 +131,24 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.log.Sugar().Warn("Error getting audio features", zap.Int("len_features", len(audioFeatures)))
 	} else {
 		af := audioFeatures[0]
+		m := &occipital.TrackMeta{
+			DurationMs:    int(af.Duration),
+			Key:           int(af.Key),
+			Mode:          int(af.Mode),
+			Tempo:         af.Tempo,
+			TimeSignature: int(af.TimeSignature),
+		}
+		track.Meta = m
+
 		f := &occipital.TrackFeatures{
 			Acousticness:     af.Acousticness,
 			Danceability:     af.Danceability,
-			DurationMs:       int(af.Duration),
 			Energy:           af.Energy,
 			Happiness:        af.Valence,
 			Instrumentalness: af.Instrumentalness,
-			Key:              int(af.Key),
 			Liveness:         af.Liveness,
 			Loudness:         af.Loudness,
-			Mode:             int(af.Mode),
 			Speechiness:      af.Speechiness,
-			Tempo:            af.Tempo,
-			TimeSignature:    int(af.TimeSignature),
 		}
 		track.Features = f
 	}
