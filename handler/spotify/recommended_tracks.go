@@ -32,6 +32,7 @@ func NewRecommendedTracksHandler(log *zap.Logger, spotifyClient *spotify.Spotify
 }
 
 type RecommendedTracksRequest struct {
+	Genre string `json:"genre"`
 }
 
 type RecommendedTracksResponse struct {
@@ -81,15 +82,19 @@ var (
 // @Accept json
 // @Produce json
 // @Success 200 {object} RecommendedTracksResponse
-// @Router /spotify/recommended_tracks [get]
+// @Router /spotify/recommended_tracks [post]
 func (h *RecommendedTracksHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-
-	q := r.URL.Query()
-	genre := q.Get("genre")
+	var req RecommendedTracksRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.log.Sugar().Infow("ERROR!!", "req", req)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	ctx := context.Background()
-	seeds := genreMap[genre]
+	seeds := genreMap[req.Genre]
+
 	recs, err := h.spotifyClient.Client.GetRecommendations(ctx, seeds, nil, spot.Limit(48))
 	if err != nil {
 		http.Error(w, "featured playlist error: "+err.Error(), http.StatusInternalServerError)
@@ -103,7 +108,10 @@ func (h *RecommendedTracksHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 		t.Artist = util.GetFirstArtist(track.Artists)
 		t.Source = "SPOTIFY"
 		t.SourceID = string(track.ID)
-		t.Image = *util.GetThumb(track.Album)
+		thumb := util.GetThumb(track.Album)
+		if thumb != nil {
+			t.Image = *thumb
+		}
 		tracks = append(tracks, t)
 	}
 
