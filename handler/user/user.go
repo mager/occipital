@@ -3,7 +3,6 @@ package user
 import (
 	"database/sql"
 	"encoding/json"
-	"io"
 	"net/http"
 	"strconv"
 
@@ -31,8 +30,8 @@ func NewUserHandler(log *zap.Logger, db *sql.DB) *UserHandler {
 }
 
 type UserResponse struct {
-	ID       int     `json:"id"`
-	Username *string `json:"username"`
+	ID       int    `json:"id"`
+	Username string `json:"username"`
 }
 
 // GetUser godoc
@@ -101,17 +100,8 @@ func (h *UserHandler) updateUser(w http.ResponseWriter, r *http.Request) {
 	userID := r.URL.Query().Get("id")
 
 	// Read the request body
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		h.log.Error("Failed to read request body", zap.Error(err))
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-
-	// Decode the body into the user struct
 	var user database.User
-	err = json.Unmarshal(body, &user)
-	if err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
 		h.log.Error("Failed to parse request body", zap.Error(err))
 		w.WriteHeader(http.StatusBadRequest)
 		return

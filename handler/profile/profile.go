@@ -29,8 +29,8 @@ func NewProfileHandler(log *zap.Logger, db *sql.DB) *ProfileHandler {
 }
 
 type ProfileResponse struct {
-	ID       int     `json:"id"`
-	Username *string `json:"username"`
+	ID       int    `json:"id"`
+	Username string `json:"username"`
 }
 
 // GetProfile godoc
