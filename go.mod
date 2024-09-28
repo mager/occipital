@@ -7,6 +7,7 @@ require (
 	github.com/gorilla/mux v1.8.1
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/lib/pq v1.10.9
+	github.com/mager/go-musixmatch v0.0.0-20240928222852-036f3bd702ce
 	github.com/mager/musicbrainz-go v0.0.6
 	github.com/swaggo/swag v1.16.3
 	github.com/zmb3/spotify/v2 v2.4.2

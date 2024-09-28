@@ -9,8 +9,10 @@ import (
 
 	spot "github.com/zmb3/spotify/v2"
 
+	"github.com/mager/go-musixmatch/params"
 	mb "github.com/mager/musicbrainz-go/musicbrainz"
 	"github.com/mager/occipital/musicbrainz"
+	"github.com/mager/occipital/musixmatch"
 	"github.com/mager/occipital/occipital"
 	"github.com/mager/occipital/spotify"
 	"github.com/mager/occipital/util"
@@ -43,6 +45,7 @@ type GetTrackHandler struct {
 	log               *zap.Logger
 	spotifyClient     *spotify.SpotifyClient
 	musicbrainzClient *musicbrainz.MusicbrainzClient
+	musixmatchClient  *musixmatch.MusixmatchClient
 }
 
 func (*GetTrackHandler) Pattern() string {
@@ -50,11 +53,17 @@ func (*GetTrackHandler) Pattern() string {
 }
 
 // NewGetTrackHandler builds a new GetTrackHandler.
-func NewGetTrackHandler(log *zap.Logger, spotifyClient *spotify.SpotifyClient, musicbrainzClient *musicbrainz.MusicbrainzClient) *GetTrackHandler {
+func NewGetTrackHandler(
+	log *zap.Logger,
+	spotifyClient *spotify.SpotifyClient,
+	musicbrainzClient *musicbrainz.MusicbrainzClient,
+	musixmatchClient *musixmatch.MusixmatchClient,
+) *GetTrackHandler {
 	return &GetTrackHandler{
 		log:               log,
 		spotifyClient:     spotifyClient,
 		musicbrainzClient: musicbrainzClient,
+		musixmatchClient:  musixmatchClient,
 	}
 }
 
@@ -89,6 +98,7 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Channels for receiving results
 	trackChan := make(chan *spot.FullTrack, 1)
 	audioFeaturesChan := make(chan []*spot.AudioFeatures, 1)
+	audioAnalysisChan := make(chan *spot.AudioAnalysis, 1)
 	// Fetch track asynchronously
 	go func() {
 		var t *spot.FullTrack
@@ -99,7 +109,7 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// Fetch audio features asynchronously
+	// Fetch other data asynchronously
 	go func() {
 		var audioFeatures []*spot.AudioFeatures
 		audioFeatures, err = h.spotifyClient.Client.GetAudioFeatures(ctx, spot.ID(sourceId))
@@ -109,9 +119,19 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
+	go func() {
+		var audioAnalysis *spot.AudioAnalysis
+		audioAnalysis, err = h.spotifyClient.Client.GetAudioAnalysis(ctx, spot.ID(sourceId))
+		audioAnalysisChan <- audioAnalysis
+		if err != nil {
+			h.log.Sugar().Errorf("error fetching audio features: %v", err)
+		}
+	}()
+
 	// Receive track and audio features
 	t := <-trackChan
 	audioFeatures := <-audioFeaturesChan
+	audioAnalysis := <-audioAnalysisChan
 
 	// Check for errors
 	if err != nil {
@@ -126,7 +146,7 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	track.Source = source
 	track.Image = *util.GetThumb(t.Album)
 
-	// Audio features
+	// Track features
 	if audioFeatures == nil || (len(audioFeatures) == 0 || len(audioFeatures) > 1) {
 		h.log.Sugar().Warn("Error getting audio features", zap.Int("len_features", len(audioFeatures)))
 	} else {
@@ -152,6 +172,20 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		track.Features = f
 	}
+
+	// Track waveform
+	// if audioAnalysis == nil {
+	// 	h.log.Warn("Error getting audio analysis")
+	// } else {
+	// 	segments := make([]*occipital.TrackWaveformSegment, len(audioAnalysis.Segments))
+	// 	for _, segment := range audioAnalysis.Segments {
+	// 		segments = append(segments, &occipital.TrackWaveformSegment{
+	// 			Start:       segment.Start,
+	// 			LoudnessMax: segment.LoudnessMax,
+	// 		})
+	// 	}
+	// 	track.Waveform.Segments = segments
+	// }
 
 	track.ReleaseDate = *util.GetReleaseDate(t.Album)
 
@@ -192,6 +226,21 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 			// Get genres for track
 			track.Genres = getGenresForRecording(rec.Recording)
+		}
+
+		// Call Musixmatch to get lyrics
+		lyrics, err := h.musixmatchClient.Client.GetTrackLyrics(ctx, params.TrackISRC(track.ISRC))
+		if err != nil {
+			h.log.Sugar().Errorf("error fetching lyrics: %v", err)
+		} else if lyrics != nil {
+			h.log.Info("Got lyrics", zap.Any("lyrics", lyrics))
+		}
+		// Call Musixmatch to get lyric mood
+		mood, err := h.musixmatchClient.Client.GetTrackLyricsMood(ctx, params.TrackISRC(track.ISRC))
+		if err != nil {
+			h.log.Sugar().Errorf("error fetching lyrics: %v", err)
+		} else if mood != nil {
+			h.log.Info("Got lyrics mood", zap.Any("mood_list", mood))
 		}
 	}
 

@@ -19,6 +19,7 @@ import (
 	trackHandler "github.com/mager/occipital/handler/track"
 	userHandler "github.com/mager/occipital/handler/user"
 	"github.com/mager/occipital/musicbrainz"
+	"github.com/mager/occipital/musixmatch"
 	"github.com/mager/occipital/spotify"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
@@ -48,6 +49,7 @@ func main() {
 			config.Options,
 			spotify.Options,
 			musicbrainz.Options,
+			musixmatch.Options,
 			database.Options,
 
 			AsRoute(health.NewHealthHandler),
@@ -69,6 +71,7 @@ func NewHTTPServer(
 	db *sql.DB,
 	spotifyClient *spotify.SpotifyClient,
 	musicbrainzClient *musicbrainz.MusicbrainzClient,
+	musixmatchClient *musixmatch.MusixmatchClient,
 ) *http.Server {
 	router := mux.NewRouter()
 
@@ -105,7 +108,7 @@ func NewHTTPServer(
 	spotifyRecommendedTracksHandler := spotHandler.NewRecommendedTracksHandler(logger, spotifyClient)
 	router.Handle(spotifyRecommendedTracksHandler.Pattern(), spotifyRecommendedTracksHandler)
 
-	spotifyGetTrackHandler := trackHandler.NewGetTrackHandler(logger, spotifyClient, musicbrainzClient)
+	spotifyGetTrackHandler := trackHandler.NewGetTrackHandler(logger, spotifyClient, musicbrainzClient, musixmatchClient)
 	router.Handle(spotifyGetTrackHandler.Pattern(), spotifyGetTrackHandler)
 
 	return srv

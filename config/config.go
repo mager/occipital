@@ -11,6 +11,8 @@ type Config struct {
 
 	SpotifyID     string
 	SpotifySecret string
+
+	MusixmatchAPIKey string
 }
 
 func ProvideConfig() Config {
