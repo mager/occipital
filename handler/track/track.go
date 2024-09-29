@@ -28,6 +28,7 @@ var (
 		"drums (drum set)":         "drums",
 		"percussion":               "drums",
 		"acoustic guitar":          "guitar",
+		"family guitar":            "guitar",
 		"electric guitar":          "guitar",
 		"foot stomps":              "foot-stomps",
 		"Wurlitzer electric piano": "wurlitzer",
@@ -189,13 +190,18 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if audioAnalysis == nil || audioAnalysis.Segments == nil || len(audioAnalysis.Segments) == 0 {
 		h.log.Warn("Error getting audio analysis")
 	} else {
-		track.Analysis = &occipital.TrackAnalysis{}
+		track.Analysis = &occipital.TrackAnalysis{
+			Duration: audioAnalysis.Track.Duration,
+		}
 		segs := make([]occipital.TrackAnalysisSegment, len(audioAnalysis.Segments))
-		h.log.Info("segs", zap.Any("len_segs", len(segs)))
 		for idx, segment := range audioAnalysis.Segments {
 			segs[idx] = occipital.TrackAnalysisSegment{
-				Start:       segment.Start,
-				LoudnessMax: segment.LoudnessMax,
+				Confidence:    segment.Confidence,
+				Duration:      segment.Duration,
+				Start:         segment.Start,
+				LoudnessMax:   segment.LoudnessMax,
+				LoudnessStart: segment.LoudnessStart,
+				LoudnessEnd:   segment.LoudnessEnd,
 			}
 		}
 		track.Analysis.Segments = segs

@@ -92,10 +92,15 @@ type TrackArtistInstruments struct {
 }
 
 type TrackAnalysis struct {
+	Duration float64                `json:"duration"`
 	Segments []TrackAnalysisSegment `json:"segments"`
 }
 
 type TrackAnalysisSegment struct {
-	Start       float64 `json:"start"`
-	LoudnessMax float64 `json:"loudness_max"`
+	Duration      float64 `json:"duration"`
+	Confidence    float64 `json:"confidence"`
+	Start         float64 `json:"start"`
+	LoudnessStart float64 `json:"loudness_start"`
+	LoudnessEnd   float64 `json:"loudness_end"`
+	LoudnessMax   float64 `json:"loudness_max"`
 }
