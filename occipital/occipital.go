@@ -9,7 +9,7 @@ type Track struct {
 
 	Meta     *TrackMeta     `json:"meta"`
 	Features *TrackFeatures `json:"features"`
-	Waveform *TrackWaveform `json:"waveform"`
+	Analysis *TrackAnalysis `json:"analysis"`
 
 	ReleaseDate string                    `json:"release_date"`
 	Genres      []string                  `json:"genres"`
@@ -91,11 +91,11 @@ type TrackArtistInstruments struct {
 	Instruments []string `json:"instruments"`
 }
 
-type TrackWaveform struct {
-	Segments []*TrackWaveformSegment `json:"segments"`
+type TrackAnalysis struct {
+	Segments []TrackAnalysisSegment `json:"segments"`
 }
 
-type TrackWaveformSegment struct {
+type TrackAnalysisSegment struct {
 	Start       float64 `json:"start"`
 	LoudnessMax float64 `json:"loudness_max"`
 }

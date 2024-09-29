@@ -3,9 +3,11 @@ package track
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 
 	spot "github.com/zmb3/spotify/v2"
 
@@ -96,55 +98,65 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var err error
 
 	// Channels for receiving results
-	trackChan := make(chan *spot.FullTrack, 1)
-	audioFeaturesChan := make(chan []*spot.AudioFeatures, 1)
-	audioAnalysisChan := make(chan *spot.AudioAnalysis, 1)
-	// Fetch track asynchronously
+	var wg sync.WaitGroup
+	var fullTrack *spot.FullTrack
+	var audioFeatures []*spot.AudioFeatures
+	var audioAnalysis *spot.AudioAnalysis
+	errChan := make(chan error, 3)
+
+	// Fetch track
+	wg.Add(1)
 	go func() {
-		var t *spot.FullTrack
-		t, err = h.spotifyClient.Client.GetTrack(ctx, spot.ID(sourceId))
-		trackChan <- t
+		defer wg.Done()
+		t, err := h.spotifyClient.Client.GetTrack(ctx, spot.ID(sourceId))
 		if err != nil {
-			h.log.Sugar().Errorf("error fetching track: %v", err)
+			errChan <- fmt.Errorf("error fetching track: %v", err)
+			return
 		}
+		fullTrack = t
+	}()
+	// Fetch audio features
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		af, err := h.spotifyClient.Client.GetAudioFeatures(ctx, spot.ID(sourceId))
+		if err != nil {
+			errChan <- fmt.Errorf("error fetching audio features: %v", err)
+			return
+		}
+		audioFeatures = af
 	}()
 
-	// Fetch other data asynchronously
+	// Fetch audio analysis
+	wg.Add(1)
 	go func() {
-		var audioFeatures []*spot.AudioFeatures
-		audioFeatures, err = h.spotifyClient.Client.GetAudioFeatures(ctx, spot.ID(sourceId))
-		audioFeaturesChan <- audioFeatures
+		defer wg.Done()
+		aa, err := h.spotifyClient.Client.GetAudioAnalysis(ctx, spot.ID(sourceId))
 		if err != nil {
-			h.log.Sugar().Errorf("error fetching audio features: %v", err)
+			errChan <- fmt.Errorf("error fetching audio analysis: %v", err)
+			return
 		}
+		audioAnalysis = aa
 	}()
 
-	go func() {
-		var audioAnalysis *spot.AudioAnalysis
-		audioAnalysis, err = h.spotifyClient.Client.GetAudioAnalysis(ctx, spot.ID(sourceId))
-		audioAnalysisChan <- audioAnalysis
-		if err != nil {
-			h.log.Sugar().Errorf("error fetching audio features: %v", err)
-		}
-	}()
+	// Wait for all requests to complete
+	wg.Wait()
 
-	// Receive track and audio features
-	t := <-trackChan
-	audioFeatures := <-audioFeaturesChan
-	audioAnalysis := <-audioAnalysisChan
-
-	// Check for errors
-	if err != nil {
-		http.Error(w, "track fetch error: "+err.Error(), http.StatusInternalServerError)
+	// Check for errors from any of the goroutines
+	close(errChan)
+	for e := range errChan {
+		http.Error(w, e.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	h.log.Info("FINISHED!")
+
 	var track occipital.Track
-	track.Name = t.Name
-	track.Artist = util.GetFirstArtist(t.Artists)
+	track.Name = fullTrack.Name
+	track.Artist = util.GetFirstArtist(fullTrack.Artists)
 	track.SourceID = sourceId
 	track.Source = source
-	track.Image = *util.GetThumb(t.Album)
+	track.Image = *util.GetThumb(fullTrack.Album)
 
 	// Track features
 	if audioFeatures == nil || (len(audioFeatures) == 0 || len(audioFeatures) > 1) {
@@ -173,24 +185,26 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		track.Features = f
 	}
 
-	// Track waveform
-	// if audioAnalysis == nil {
-	// 	h.log.Warn("Error getting audio analysis")
-	// } else {
-	// 	segments := make([]*occipital.TrackWaveformSegment, len(audioAnalysis.Segments))
-	// 	for _, segment := range audioAnalysis.Segments {
-	// 		segments = append(segments, &occipital.TrackWaveformSegment{
-	// 			Start:       segment.Start,
-	// 			LoudnessMax: segment.LoudnessMax,
-	// 		})
-	// 	}
-	// 	track.Waveform.Segments = segments
-	// }
+	// Track analysis
+	if audioAnalysis == nil || audioAnalysis.Segments == nil || len(audioAnalysis.Segments) == 0 {
+		h.log.Warn("Error getting audio analysis")
+	} else {
+		track.Analysis = &occipital.TrackAnalysis{}
+		segs := make([]occipital.TrackAnalysisSegment, len(audioAnalysis.Segments))
+		h.log.Info("segs", zap.Any("len_segs", len(segs)))
+		for idx, segment := range audioAnalysis.Segments {
+			segs[idx] = occipital.TrackAnalysisSegment{
+				Start:       segment.Start,
+				LoudnessMax: segment.LoudnessMax,
+			}
+		}
+		track.Analysis.Segments = segs
+	}
 
-	track.ReleaseDate = *util.GetReleaseDate(t.Album)
+	track.ReleaseDate = *util.GetReleaseDate(fullTrack.Album)
 
-	artistIDs := make([]spot.ID, len(t.Artists))
-	for _, artist := range t.Artists {
+	artistIDs := make([]spot.ID, len(fullTrack.Artists))
+	for _, artist := range fullTrack.Artists {
 		artistIDs = append(artistIDs, spot.ID(artist.ID))
 	}
 	artists, err := h.spotifyClient.Client.GetArtists(ctx, artistIDs...)
@@ -199,7 +213,7 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	track.Genres = util.GetGenresForArtists(artists)
 
-	track.ISRC = *util.GetISRC(t)
+	track.ISRC = *util.GetISRC(fullTrack)
 	if track.ISRC != "" {
 		// Call Musicbrainz to get the list of instruments for the track
 		searchRecsReq := mb.SearchRecordingsByISRCRequest{
