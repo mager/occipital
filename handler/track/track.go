@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
-	"strings"
 	"sync"
 
 	spot "github.com/zmb3/spotify/v2"
@@ -146,11 +145,16 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Check for errors from any of the goroutines
 	close(errChan)
 	for e := range errChan {
-		http.Error(w, e.Error(), http.StatusInternalServerError)
-		return
+		// Log the error but continue processing
+		h.log.Warn("API call failed", zap.Error(e))
 	}
 
-	h.log.Info("FINISHED!")
+	// Add null checks before using the results
+	if fullTrack == nil {
+		h.log.Warn("Failed to fetch track data")
+		http.Error(w, "Track not found", http.StatusNotFound)
+		return
+	}
 
 	var track occipital.Track
 	track.Name = fullTrack.Name
@@ -187,6 +191,7 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Track analysis
+	// See https://developer.spotify.com/documentation/web-api/reference/get-audio-analysis
 	if audioAnalysis == nil || audioAnalysis.Segments == nil || len(audioAnalysis.Segments) == 0 {
 		h.log.Warn("Error getting audio analysis")
 	} else {
@@ -204,7 +209,8 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				LoudnessEnd:   segment.LoudnessEnd,
 			}
 		}
-		track.Analysis.Segments = segs
+		simplifiedSegs := SimplifySegments(segs, 10)
+		track.Analysis.Segments = simplifiedSegs
 	}
 
 	track.ReleaseDate = *util.GetReleaseDate(fullTrack.Album)
@@ -267,55 +273,6 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	resp.Track = track
 
 	json.NewEncoder(w).Encode(resp)
-}
-
-// DEPRECATED
-func getInstrumentsForRecording(rec mb.Recording) []*occipital.TrackInstrument {
-	// Use a map to store instruments with their artists
-	instrumentMap := make(map[string][]string)
-
-	// Iterate through each relation
-	for _, relation := range *rec.Relations {
-		if relation.Type == "instrument" && len(relation.Attributes) == 1 {
-			// Get instrument name and artist name
-			instrumentName := relation.Attributes[0]
-			artistName := relation.Artist.Name
-
-			// Check if there's a mapping for the instrument
-			mappedInstrumentName, ok := instrumentMappings[instrumentName]
-			if ok {
-				instrumentName = mappedInstrumentName
-			}
-
-			// Add artist to instrument map
-			if _, ok := instrumentMap[instrumentName]; !ok {
-				instrumentMap[instrumentName] = []string{artistName}
-			} else {
-				// Check if artist already exists for this instrument
-				found := false
-				for _, artist := range instrumentMap[instrumentName] {
-					if artist == artistName {
-						found = true
-						break
-					}
-				}
-				if !found {
-					instrumentMap[instrumentName] = append(instrumentMap[instrumentName], artistName)
-				}
-			}
-		}
-	}
-
-	// Convert instrumentMap to []*occipital.TrackInstrument
-	ins := make([]*occipital.TrackInstrument, 0, len(instrumentMap))
-	for instrumentName, artists := range instrumentMap {
-		ins = append(ins, &occipital.TrackInstrument{
-			Name:    strings.ToLower(instrumentName),
-			Artists: artists,
-		})
-	}
-
-	return ins
 }
 
 func getArtistInstrumentsForRecording(rec mb.Recording) []*occipital.TrackArtistInstruments {
@@ -404,4 +361,49 @@ func getGenresForRecording(rec mb.Recording) []string {
 	}
 
 	return genres
+}
+
+// SimplifySegments reduces the number of segments by averaging over a fixed interval
+func SimplifySegments(segments []occipital.TrackAnalysisSegment, groupSize int) []occipital.TrackAnalysisSegment {
+	simplifiedSegments := []occipital.TrackAnalysisSegment{}
+	var currentGroup []occipital.TrackAnalysisSegment
+
+	for i, segment := range segments {
+		currentGroup = append(currentGroup, segment)
+
+		// Once we have enough segments for the group, process the group
+		if (i+1)%groupSize == 0 || i == len(segments)-1 {
+			avgSegment := averageGroup(currentGroup)
+			simplifiedSegments = append(simplifiedSegments, avgSegment)
+			currentGroup = []occipital.TrackAnalysisSegment{} // Reset group
+		}
+	}
+	return simplifiedSegments
+}
+
+// averageGroup calculates the average values for a group of segments
+func averageGroup(group []occipital.TrackAnalysisSegment) occipital.TrackAnalysisSegment {
+	totalDuration := 0.0
+	totalConfidence := 0.0
+	totalLoudnessMax := 0.0
+	totalLoudnessStart := 0.0
+	totalLoudnessEnd := 0.0
+
+	for _, segment := range group {
+		totalDuration += segment.Duration
+		totalConfidence += segment.Confidence
+		totalLoudnessMax += segment.LoudnessMax
+		totalLoudnessStart += segment.LoudnessStart
+		totalLoudnessEnd += segment.LoudnessEnd
+	}
+
+	groupSize := float64(len(group))
+	return occipital.TrackAnalysisSegment{
+		Duration:      totalDuration,
+		Confidence:    totalConfidence / groupSize,
+		LoudnessMax:   totalLoudnessMax / groupSize,
+		LoudnessStart: totalLoudnessStart / groupSize,
+		LoudnessEnd:   totalLoudnessEnd / groupSize,
+		Start:         group[0].Start, // Use the start of the first segment
+	}
 }

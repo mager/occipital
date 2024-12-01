@@ -87,7 +87,6 @@ func (h *RecommendedTracksHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 	w.Header().Set("Content-Type", "application/json")
 	var req RecommendedTracksRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.log.Sugar().Infow("ERROR!!", "req", req)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
