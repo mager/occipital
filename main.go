@@ -13,6 +13,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/mager/occipital/config"
 	"github.com/mager/occipital/database"
+	discoverHandler "github.com/mager/occipital/handler/discover"
 	"github.com/mager/occipital/handler/health"
 	profileHandler "github.com/mager/occipital/handler/profile"
 	spotHandler "github.com/mager/occipital/handler/spotify"
@@ -58,6 +59,7 @@ func main() {
 			AsRoute(spotHandler.NewSearchHandler),
 			AsRoute(spotHandler.NewRecommendedTracksHandler),
 			AsRoute(trackHandler.NewGetTrackHandler),
+			AsRoute(discoverHandler.NewDiscoverHandler),
 
 			zap.NewProduction,
 		),
@@ -110,6 +112,9 @@ func NewHTTPServer(
 
 	spotifyGetTrackHandler := trackHandler.NewGetTrackHandler(logger, spotifyClient, musicbrainzClient, musixmatchClient)
 	router.Handle(spotifyGetTrackHandler.Pattern(), spotifyGetTrackHandler)
+
+	discoverHandler := discoverHandler.NewDiscoverHandler(logger, spotifyClient)
+	router.Handle(discoverHandler.Pattern(), discoverHandler)
 
 	return srv
 }

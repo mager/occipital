@@ -7,8 +7,17 @@ definitions:
       username:
         type: string
     type: object
+  discover.DiscoverResponse:
+    properties:
+      tracks:
+        items:
+          $ref: '#/definitions/occipital.Track'
+        type: array
+    type: object
   occipital.Track:
     properties:
+      analysis:
+        $ref: '#/definitions/occipital.TrackAnalysis'
       artist:
         type: string
       features:
@@ -25,6 +34,8 @@ definitions:
         type: array
       isrc:
         type: string
+      meta:
+        $ref: '#/definitions/occipital.TrackMeta'
       name:
         type: string
       release_date:
@@ -33,6 +44,77 @@ definitions:
         type: string
       source_id:
         type: string
+    type: object
+  occipital.TrackAnalysis:
+    properties:
+      duration:
+        type: number
+      segments:
+        items:
+          $ref: '#/definitions/occipital.TrackAnalysisSegment'
+        type: array
+    type: object
+  occipital.TrackAnalysisSegment:
+    properties:
+      confidence:
+        description: 'Confidence, from 0.0 to 1.0, of the reliability of the segmentation.
+          Segments of the song which are difficult to logically segment (e.g: noise)
+          may correspond to low values in this field.'
+        type: number
+      duration:
+        description: Duration is the duration (in seconds) of the segment.
+        type: number
+      loudness_end:
+        description: LoudnessEnd is the offset loudness of the segment in decibels
+          (dB). This value should be equivalent to the loudness_start of the following
+          segment.
+        type: number
+      loudness_max:
+        description: LoudnessMax is the peak loudness of the segment in decibels (dB).
+          Combined with loudness_start and loudness_max_time, these components can
+          be used to describe the "attack" of the segment.
+        type: number
+      loudness_start:
+        description: LoudnessStart is the onset loudness of the segment in decibels
+          (dB). Combined with loudness_max and loudness_max_time, these components
+          can be used to describe the "attack" of the segment.
+        type: number
+      pitches:
+        description: Pitches are given by a “chroma” vector, corresponding to the
+          12 pitch classes C, C#, D to B, with values ranging from 0 to 1 that describe
+          the relative dominance of every pitch in the chromatic scale. For example
+          a C Major chord would likely be represented by large values of C, E and
+          G (i.e. classes 0, 4, and 7). Vectors are normalized to 1 by their strongest
+          dimension, therefore noisy sounds are likely represented by values that
+          are all close to 1, while pure tones are described by one value at 1 (the
+          pitch) and others near 0. As can be seen below, the 12 vector indices are
+          a combination of low-power spectrum values at their respective pitch frequencies.
+        items:
+          type: number
+        type: array
+      start:
+        description: Start is the starting point (in seconds) of the segment
+        type: number
+      timbres:
+        description: 'Timbres are the quality of a musical note or sound that distinguishes
+          different types of musical instruments, or voices. It is a complex notion
+          also referred to as sound color, texture, or tone quality, and is derived
+          from the shape of a segment’s spectro-temporal surface, independently of
+          pitch and loudness. The timbre feature is a vector that includes 12 unbounded
+          values roughly centered around 0. Those values are high level abstractions
+          of the spectral surface, ordered by degree of importance. For completeness
+          however, the first dimension represents the average loudness of the segment;
+          second emphasizes brightness; third is more closely correlated to the flatness
+          of a sound; fourth to sounds with a stronger attack; etc. See an image below
+          representing the 12 basis functions (i.e. template segments). The actual
+          timbre of the segment is best described as a linear combination of these
+          12 basis functions weighted by the coefficient values: timbre = c1 x b1
+          + c2 x b2 + ... + c12 x b12, where c1 to c12 represent the 12 coefficients
+          and b1 to b12 the 12 basis functions as displayed below. Timbre vectors
+          are best used in comparison with each other.'
+        items:
+          type: number
+        type: array
     type: object
   occipital.TrackArtistInstruments:
     properties:
@@ -58,11 +140,6 @@ definitions:
           A value of 0.0 is least danceable and 1.0 is most danceable.
           Example: 0.585
         type: number
-      duration_ms:
-        description: |-
-          DurationMs is the duration of the track in milliseconds.
-          Example: 237040
-        type: integer
       energy:
         description: |-
           Energy is a measure from 0.0 to 1.0 and represents a perceptual measure of intensity
@@ -86,12 +163,6 @@ definitions:
           Values above 0.5 are intended to represent instrumental tracks, but confidence is higher as the value approaches 1.0.
           Example: 0.00686
         type: number
-      key:
-        description: |-
-          Key is the key the track is in. Integers map to pitches using standard Pitch Class notation. E.g. 0 = C, 1 = C♯/D♭, 2 = D, and so on. If no key was detected, the value is -1.
-          Range: -1 - 11
-          Example: 9
-        type: integer
       liveness:
         description: |-
           Liveness detects the presence of an audience in the recording. Higher liveness values represent an increased probability that the track was performed live.
@@ -104,12 +175,6 @@ definitions:
           Loudness is the quality of a sound that is the primary psychological correlate of physical strength (amplitude). Values typically range between -60 and 0 db.
           Example: -5.883
         type: number
-      mode:
-        description: |-
-          Mode indicates the modality (major or minor) of a track, the type of scale from which its melodic content is derived.
-          Major is represented by 1 and minor is 0.
-          Example: 0
-        type: integer
       speechiness:
         description: |-
           Speechiness detects the presence of spoken words in a track. The more exclusively speech-like the recording (e.g. talk show, audio book, poetry), the closer to 1.0 the attribute value.
@@ -117,6 +182,26 @@ definitions:
           including such cases as rap music. Values below 0.33 most likely represent music and other non-speech-like tracks.
           Example: 0.0556
         type: number
+    type: object
+  occipital.TrackMeta:
+    properties:
+      duration_ms:
+        description: |-
+          DurationMs is the duration of the track in milliseconds.
+          Example: 237040
+        type: integer
+      key:
+        description: |-
+          Key is the key the track is in. Integers map to pitches using standard Pitch Class notation. E.g. 0 = C, 1 = C♯/D♭, 2 = D, and so on. If no key was detected, the value is -1.
+          Range: -1 - 11
+          Example: 9
+        type: integer
+      mode:
+        description: |-
+          Mode indicates the modality (major or minor) of a track, the type of scale from which its melodic content is derived.
+          Major is represented by 1 and minor is 0.
+          Example: 0
+        type: integer
       tempo:
         description: |-
           Tempo is the overall estimated tempo of a track in beats per minute (BPM). In musical terminology, tempo is the speed or pace of a given piece and derives directly from the average beat duration.
@@ -213,6 +298,19 @@ info:
   title: Occipital
   version: "1.0"
 paths:
+  /discover:
+    post:
+      consumes:
+      - application/json
+      description: Get the best content
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/discover.DiscoverResponse'
+      summary: Home page
   /profile:
     get:
       consumes:
