@@ -9,10 +9,12 @@ import (
 	"os"
 	"strings"
 
+	"cloud.google.com/go/firestore"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/mux"
 	"github.com/mager/occipital/config"
 	"github.com/mager/occipital/database"
+	fs "github.com/mager/occipital/firestore"
 	discoverHandler "github.com/mager/occipital/handler/discover"
 	"github.com/mager/occipital/handler/health"
 	profileHandler "github.com/mager/occipital/handler/profile"
@@ -50,6 +52,7 @@ func main() {
 			config.Options,
 			spotify.Options,
 			musicbrainz.Options,
+			fs.Options,
 			musixmatch.Options,
 			database.Options,
 
@@ -71,6 +74,7 @@ func NewHTTPServer(
 	lc fx.Lifecycle,
 	logger *zap.Logger,
 	db *sql.DB,
+	fs *firestore.Client,
 	spotifyClient *spotify.SpotifyClient,
 	musicbrainzClient *musicbrainz.MusicbrainzClient,
 	musixmatchClient *musixmatch.MusixmatchClient,
@@ -113,7 +117,7 @@ func NewHTTPServer(
 	spotifyGetTrackHandler := trackHandler.NewGetTrackHandler(logger, spotifyClient, musicbrainzClient, musixmatchClient)
 	router.Handle(spotifyGetTrackHandler.Pattern(), spotifyGetTrackHandler)
 
-	discoverHandler := discoverHandler.NewDiscoverHandler(logger, spotifyClient)
+	discoverHandler := discoverHandler.NewDiscoverHandler(logger, fs, spotifyClient)
 	router.Handle(discoverHandler.Pattern(), discoverHandler)
 
 	return srv
