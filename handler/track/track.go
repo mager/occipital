@@ -30,6 +30,7 @@ var (
 		"family guitar":            "guitar",
 		"electric guitar":          "guitar",
 		"foot stomps":              "foot-stomps",
+		"double bass":              "double-bass",
 		"Wurlitzer electric piano": "wurlitzer",
 		"Rhodes piano":             "piano",
 	}
@@ -100,8 +101,6 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Channels for receiving results
 	var wg sync.WaitGroup
 	var fullTrack *spot.FullTrack
-	var audioFeatures []*spot.AudioFeatures
-	var audioAnalysis *spot.AudioAnalysis
 	errChan := make(chan error, 3)
 
 	// Fetch track
@@ -114,29 +113,6 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		fullTrack = t
-	}()
-	// Fetch audio features
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		af, err := h.spotifyClient.Client.GetAudioFeatures(ctx, spot.ID(sourceId))
-		if err != nil {
-			errChan <- fmt.Errorf("error fetching audio features: %v", err)
-			return
-		}
-		audioFeatures = af
-	}()
-
-	// Fetch audio analysis
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		aa, err := h.spotifyClient.Client.GetAudioAnalysis(ctx, spot.ID(sourceId))
-		if err != nil {
-			errChan <- fmt.Errorf("error fetching audio analysis: %v", err)
-			return
-		}
-		audioAnalysis = aa
 	}()
 
 	// Wait for all requests to complete
@@ -162,56 +138,6 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	track.SourceID = sourceId
 	track.Source = source
 	track.Image = *util.GetThumb(fullTrack.Album)
-
-	// Track features
-	if audioFeatures == nil || (len(audioFeatures) == 0 || len(audioFeatures) > 1) {
-		h.log.Sugar().Warn("Error getting audio features", zap.Int("len_features", len(audioFeatures)))
-	} else {
-		af := audioFeatures[0]
-		m := &occipital.TrackMeta{
-			DurationMs:    int(af.Duration),
-			Key:           int(af.Key),
-			Mode:          int(af.Mode),
-			Tempo:         af.Tempo,
-			TimeSignature: int(af.TimeSignature),
-		}
-		track.Meta = m
-
-		f := &occipital.TrackFeatures{
-			Acousticness:     af.Acousticness,
-			Danceability:     af.Danceability,
-			Energy:           af.Energy,
-			Happiness:        af.Valence,
-			Instrumentalness: af.Instrumentalness,
-			Liveness:         af.Liveness,
-			Loudness:         af.Loudness,
-			Speechiness:      af.Speechiness,
-		}
-		track.Features = f
-	}
-
-	// Track analysis
-	// See https://developer.spotify.com/documentation/web-api/reference/get-audio-analysis
-	if audioAnalysis == nil || audioAnalysis.Segments == nil || len(audioAnalysis.Segments) == 0 {
-		h.log.Warn("Error getting audio analysis")
-	} else {
-		track.Analysis = &occipital.TrackAnalysis{
-			Duration: audioAnalysis.Track.Duration,
-		}
-		segs := make([]occipital.TrackAnalysisSegment, len(audioAnalysis.Segments))
-		for idx, segment := range audioAnalysis.Segments {
-			segs[idx] = occipital.TrackAnalysisSegment{
-				Confidence:    segment.Confidence,
-				Duration:      segment.Duration,
-				Start:         segment.Start,
-				LoudnessMax:   segment.LoudnessMax,
-				LoudnessStart: segment.LoudnessStart,
-				LoudnessEnd:   segment.LoudnessEnd,
-			}
-		}
-		simplifiedSegs := SimplifySegments(segs, 10)
-		track.Analysis.Segments = simplifiedSegs
-	}
 
 	track.ReleaseDate = *util.GetReleaseDate(fullTrack.Album)
 
