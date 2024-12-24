@@ -12,6 +12,8 @@ import (
 	"github.com/mager/occipital/occipital"
 	"github.com/mager/occipital/spotify"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 )
 
 // DiscoverHandler is an http.Handler
@@ -71,12 +73,22 @@ func (h *DiscoverHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	datestr := time.Now().Format("2006-01-02")
-	docsnap, err := h.fs.Collection("billboard").Doc(datestr).Get(ctx)
+	now := time.Now()
+	offset := (int(now.Weekday()) + 4) % 7 // 4 is the offset to get to Wednesday
+	wednesday := now.AddDate(0, 0, -offset).Format("2006-01-02")
+
+	docsnap, err := h.fs.Collection("billboard").Doc(wednesday).Get(ctx)
 	if err != nil {
-		h.log.Error("Error fetching document snapshot", zap.Error(err))
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		if grpc.Code(err) == codes.NotFound { // Check if the error is a "not found" error
+			h.log.Warn("Document not found for current Wednesday, searching for last Wednesday") // Log warning
+			lastWednesday := now.AddDate(0, 0, -7).AddDate(0, 0, -offset).Format("2006-01-02")   // Calculate last Wednesday
+			docsnap, err = h.fs.Collection("billboard").Doc(lastWednesday).Get(ctx)              // Attempt to fetch last Wednesday
+		}
+		if err != nil {
+			h.log.Error("Error fetching document snapshot", zap.Error(err))
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	var tracksDoc fsClient.TracksDoc
