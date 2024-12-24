@@ -255,18 +255,20 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Call Musixmatch to get lyrics
-		lyrics, err := h.musixmatchClient.Client.GetTrackLyrics(ctx, params.TrackISRC(track.ISRC))
-		if err != nil {
-			h.log.Sugar().Errorf("error fetching lyrics: %v", err)
-		} else if lyrics != nil {
-			h.log.Info("Got lyrics", zap.Any("lyrics", lyrics))
-		}
-		// Call Musixmatch to get lyric mood
-		mood, err := h.musixmatchClient.Client.GetTrackLyricsMood(ctx, params.TrackISRC(track.ISRC))
-		if err != nil {
-			h.log.Sugar().Errorf("error fetching lyrics: %v", err)
-		} else if mood != nil {
-			h.log.Info("Got lyrics mood", zap.Any("mood_list", mood))
+		if false {
+			lyrics, err := h.musixmatchClient.Client.GetTrackLyrics(ctx, params.TrackISRC(track.ISRC))
+			if err != nil {
+				h.log.Sugar().Errorf("error fetching lyrics: %v", err)
+			} else if lyrics != nil {
+				h.log.Info("Got lyrics", zap.Any("lyrics", lyrics))
+			}
+			// Call Musixmatch to get lyric mood
+			mood, err := h.musixmatchClient.Client.GetTrackLyricsMood(ctx, params.TrackISRC(track.ISRC))
+			if err != nil {
+				h.log.Sugar().Errorf("error fetching lyrics: %v", err)
+			} else if mood != nil {
+				h.log.Info("Got lyrics mood", zap.Any("mood_list", mood))
+			}
 		}
 	}
 
