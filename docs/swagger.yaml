@@ -38,6 +38,10 @@ definitions:
         $ref: '#/definitions/occipital.TrackMeta'
       name:
         type: string
+      producers:
+        items:
+          type: string
+        type: array
       release_date:
         type: string
       source:

@@ -282,6 +282,12 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
+                "producers": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "release_date": {
                     "type": "string"
                 },

@@ -11,10 +11,11 @@ type Track struct {
 	Features *TrackFeatures `json:"features"`
 	Analysis *TrackAnalysis `json:"analysis"`
 
-	ReleaseDate string                    `json:"release_date"`
-	Genres      []string                  `json:"genres"`
-	ISRC        string                    `json:"isrc"`
-	Instruments []*TrackArtistInstruments `json:"instruments"`
+	ReleaseDate       string                    `json:"release_date"`
+	Genres            []string                  `json:"genres"`
+	ISRC              string                    `json:"isrc"`
+	Instruments       []*TrackArtistInstruments `json:"instruments"`
+	ProductionCredits []*TrackArtistProduction  `json:"production_credits"`
 }
 
 type TrackMeta struct {
@@ -89,6 +90,11 @@ type TrackInstrument struct {
 type TrackArtistInstruments struct {
 	Artist      string   `json:"artist"`
 	Instruments []string `json:"instruments"`
+}
+
+type TrackArtistProduction struct {
+	Artist    string   `json:"artist"`
+	Producers []string `json:"producers"`
 }
 
 type TrackAnalysis struct {

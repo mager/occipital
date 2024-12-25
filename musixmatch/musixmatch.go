@@ -15,7 +15,6 @@ type MusixmatchClient struct {
 func ProvideMusixmatch(cfg config.Config, l *zap.Logger) *MusixmatchClient {
 	var c MusixmatchClient
 	c.Client = mxm.New(cfg.MusixmatchAPIKey, http.DefaultClient)
-	l.Info(cfg.MusixmatchAPIKey)
 	return &c
 }
 

@@ -10,7 +10,6 @@ import (
 
 	spot "github.com/zmb3/spotify/v2"
 
-	"github.com/mager/go-musixmatch/params"
 	mb "github.com/mager/musicbrainz-go/musicbrainz"
 	"github.com/mager/occipital/musicbrainz"
 	"github.com/mager/occipital/musixmatch"
@@ -95,6 +94,8 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	sourceId := q.Get("sourceId")
 	source := q.Get("source")
 
+	l := h.log.Sugar()
+
 	var resp GetTrackResponse
 	var err error
 
@@ -138,64 +139,53 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	track.SourceID = sourceId
 	track.Source = source
 	track.Image = *util.GetThumb(fullTrack.Album)
-
 	track.ReleaseDate = *util.GetReleaseDate(fullTrack.Album)
 
-	artistIDs := make([]spot.ID, len(fullTrack.Artists))
+	artistIDs := make([]spot.ID, 0, len(fullTrack.Artists))
 	for _, artist := range fullTrack.Artists {
 		artistIDs = append(artistIDs, spot.ID(artist.ID))
 	}
 	artists, err := h.spotifyClient.Client.GetArtists(ctx, artistIDs...)
 	if err != nil {
-		h.log.Sugar().Errorf("error fetching artist: %v", err)
+		l.Errorf("error fetching artist: %v", err)
 	}
+
 	track.Genres = util.GetGenresForArtists(artists)
-
 	track.ISRC = *util.GetISRC(fullTrack)
-	if track.ISRC != "" {
-		// Call Musicbrainz to get the list of instruments for the track
-		searchRecsReq := mb.SearchRecordingsByISRCRequest{
-			ISRC: track.ISRC,
+	if track.ISRC == "" {
+		resp.Track = track
+		json.NewEncoder(w).Encode(resp)
+	}
+
+	// Call Musicbrainz to get the list of instruments for the track
+	searchRecsReq := mb.SearchRecordingsByISRCRequest{
+		ISRC: track.ISRC,
+	}
+	recs, err := h.musicbrainzClient.Client.SearchRecordingsByISRC(searchRecsReq)
+	if err != nil {
+		l.Errorf("error fetching recordings: %v", err)
+	}
+
+	// TODO: Log if there are more than 1
+	if recs.Count == 1 {
+		getRecReq := mb.GetRecordingRequest{
+			ID:       recs.Recordings[0].ID,
+			Includes: []mb.Include{"artist-rels", "genres"},
 		}
-		recs, err := h.musicbrainzClient.Client.SearchRecordingsByISRC(searchRecsReq)
+		rec, err := h.musicbrainzClient.Client.GetRecording(getRecReq)
 		if err != nil {
-			h.log.Sugar().Errorf("error fetching recordings: %v", err)
-		}
-		// If there is a single recording, fetch it
-		if recs.Count == 1 {
-			getRecReq := mb.GetRecordingRequest{
-				ID:       recs.Recordings[0].ID,
-				Includes: []mb.Include{"artist-rels", "genres"},
-			}
-			rec, err := h.musicbrainzClient.Client.GetRecording(getRecReq)
-			if err != nil {
-				h.log.Sugar().Errorf("error fetching recording: %v", err)
-			}
-			h.log.Sugar().Infow("got recording", "ID", rec.ID)
-
-			// Get instruments for track
-			track.Instruments = getArtistInstrumentsForRecording(rec.Recording)
-
-			// Get genres for track
-			track.Genres = getGenresForRecording(rec.Recording)
+			l.Errorf("error fetching recording: %v", err)
 		}
 
-		// Call Musixmatch to get lyrics
-		if false {
-			lyrics, err := h.musixmatchClient.Client.GetTrackLyrics(ctx, params.TrackISRC(track.ISRC))
-			if err != nil {
-				h.log.Sugar().Errorf("error fetching lyrics: %v", err)
-			} else if lyrics != nil {
-				h.log.Info("Got lyrics", zap.Any("lyrics", lyrics))
-			}
-			// Call Musixmatch to get lyric mood
-			mood, err := h.musixmatchClient.Client.GetTrackLyricsMood(ctx, params.TrackISRC(track.ISRC))
-			if err != nil {
-				h.log.Sugar().Errorf("error fetching lyrics: %v", err)
-			} else if mood != nil {
-				h.log.Info("Got lyrics mood", zap.Any("mood_list", mood))
-			}
+		l.Debugw("got recording", zap.String("ID", rec.ID), zap.String("ISRC", track.ISRC))
+
+		for _, relation := range *rec.Relations {
+			l.Debugw("got relation", zap.Any("relation", relation))
 		}
+
+		track.Instruments = getArtistInstrumentsForRecording(rec.Recording)
+		track.ProductionCredits = getProductionCreditsForRecording(rec.Recording)
+		track.Genres = getGenresForRecording(rec.Recording)
 	}
 
 	resp.Track = track
@@ -289,6 +279,28 @@ func getGenresForRecording(rec mb.Recording) []string {
 	}
 
 	return genres
+}
+
+func getProductionCreditsForRecording(rec mb.Recording) []*occipital.TrackArtistProduction {
+	artistProducerMap := make(map[string]struct{})
+
+	for _, relation := range *rec.Relations {
+		if relation.Type == "producer" {
+			artistProducerMap[relation.Artist.Name] = struct{}{}
+		}
+	}
+
+	// Convert artistProducerMap to []*TrackArtistProduction
+	artistProducers := make([]*occipital.TrackArtistProduction, 0, len(artistProducerMap))
+	for artistName := range artistProducerMap {
+		producers := []string{"producer"}
+		artistProducers = append(artistProducers, &occipital.TrackArtistProduction{
+			Artist:    artistName,
+			Producers: producers,
+		})
+	}
+
+	return artistProducers
 }
 
 // SimplifySegments reduces the number of segments by averaging over a fixed interval
