@@ -93,8 +93,8 @@ type TrackArtistInstruments struct {
 }
 
 type TrackArtistProduction struct {
-	Artist    string   `json:"artist"`
-	Producers []string `json:"producers"`
+	Artist  string   `json:"artist"`
+	Credits []string `json:"credits"`
 }
 
 type TrackAnalysis struct {

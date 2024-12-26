@@ -276,27 +276,34 @@ func getGenresForRecording(rec mb.Recording) []string {
 
 	return genres
 }
-
 func getProductionCreditsForRecording(rec mb.Recording) []*occipital.TrackArtistProduction {
-	artistProducerMap := make(map[string]struct{})
+	artistCreditsMap := make(map[string][]string)
+
+	supportedTypes := []string{"producer", "mix", "recording"}
 
 	for _, relation := range *rec.Relations {
-		if relation.Type == "producer" {
-			artistProducerMap[relation.Artist.Name] = struct{}{}
+		for _, supportedType := range supportedTypes { // Check against supported types
+			if relation.Type == supportedType {
+				artistCreditsMap[relation.Artist.Name] = append(artistCreditsMap[relation.Artist.Name], relation.Type)
+			}
 		}
 	}
 
-	// Convert artistProducerMap to []*TrackArtistProduction
-	artistProducers := make([]*occipital.TrackArtistProduction, 0, len(artistProducerMap))
-	for artistName := range artistProducerMap {
-		producers := []string{"producer"}
-		artistProducers = append(artistProducers, &occipital.TrackArtistProduction{
-			Artist:    artistName,
-			Producers: producers,
+	// Convert artistCreditsMap to []*TrackArtistProduction and sort by total number of credits
+	artistCredits := make([]*occipital.TrackArtistProduction, 0, len(artistCreditsMap))
+	for artistName, credits := range artistCreditsMap {
+		sort.Strings(credits) // Sort the credits for each artist
+		artistCredits = append(artistCredits, &occipital.TrackArtistProduction{
+			Artist:  artistName,
+			Credits: credits,
 		})
 	}
 
-	return artistProducers
+	sort.Slice(artistCredits, func(i, j int) bool {
+		return len(artistCredits[i].Credits) > len(artistCredits[j].Credits)
+	})
+
+	return artistCredits
 }
 
 // SimplifySegments reduces the number of segments by averaging over a fixed interval
