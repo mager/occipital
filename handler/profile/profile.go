@@ -12,7 +12,7 @@ import (
 // ProfileHandler is an http.Handler that copies its request body
 // back to the response.
 type ProfileHandler struct {
-	log *zap.Logger
+	log *zap.SugaredLogger
 	db  *sql.DB
 }
 
@@ -21,7 +21,7 @@ func (*ProfileHandler) Pattern() string {
 }
 
 // NewProfileHandler builds a new ProfileHandler.
-func NewProfileHandler(log *zap.Logger, db *sql.DB) *ProfileHandler {
+func NewProfileHandler(log *zap.SugaredLogger, db *sql.DB) *ProfileHandler {
 	return &ProfileHandler{
 		log: log,
 		db:  db,

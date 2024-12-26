@@ -12,7 +12,7 @@ type MusixmatchClient struct {
 	Client *mxm.Client
 }
 
-func ProvideMusixmatch(cfg config.Config, l *zap.Logger) *MusixmatchClient {
+func ProvideMusixmatch(cfg config.Config, l *zap.SugaredLogger) *MusixmatchClient {
 	var c MusixmatchClient
 	c.Client = mxm.New(cfg.MusixmatchAPIKey, http.DefaultClient)
 	return &c

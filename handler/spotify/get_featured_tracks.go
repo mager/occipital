@@ -14,7 +14,7 @@ import (
 
 // GetFeaturedTracksHandler is an http.Handler
 type GetFeaturedTracksHandler struct {
-	log           *zap.Logger
+	log           *zap.SugaredLogger
 	spotifyClient *spotify.SpotifyClient
 }
 
@@ -23,7 +23,7 @@ func (*GetFeaturedTracksHandler) Pattern() string {
 }
 
 // NewGetFeaturedTracksHandler builds a new GetFeaturedTracksHandler.
-func NewGetFeaturedTracksHandler(log *zap.Logger, spotifyClient *spotify.SpotifyClient) *GetFeaturedTracksHandler {
+func NewGetFeaturedTracksHandler(log *zap.SugaredLogger, spotifyClient *spotify.SpotifyClient) *GetFeaturedTracksHandler {
 	return &GetFeaturedTracksHandler{
 		log:           log,
 		spotifyClient: spotifyClient,

@@ -12,7 +12,6 @@ import (
 
 	mb "github.com/mager/musicbrainz-go/musicbrainz"
 	"github.com/mager/occipital/musicbrainz"
-	"github.com/mager/occipital/musixmatch"
 	"github.com/mager/occipital/occipital"
 	"github.com/mager/occipital/spotify"
 	"github.com/mager/occipital/util"
@@ -44,10 +43,9 @@ var (
 
 // GetTrackHandler is an http.Handler
 type GetTrackHandler struct {
-	log               *zap.Logger
+	log               *zap.SugaredLogger
 	spotifyClient     *spotify.SpotifyClient
 	musicbrainzClient *musicbrainz.MusicbrainzClient
-	musixmatchClient  *musixmatch.MusixmatchClient
 }
 
 func (*GetTrackHandler) Pattern() string {
@@ -56,16 +54,14 @@ func (*GetTrackHandler) Pattern() string {
 
 // NewGetTrackHandler builds a new GetTrackHandler.
 func NewGetTrackHandler(
-	log *zap.Logger,
+	log *zap.SugaredLogger,
 	spotifyClient *spotify.SpotifyClient,
 	musicbrainzClient *musicbrainz.MusicbrainzClient,
-	musixmatchClient *musixmatch.MusixmatchClient,
 ) *GetTrackHandler {
 	return &GetTrackHandler{
 		log:               log,
 		spotifyClient:     spotifyClient,
 		musicbrainzClient: musicbrainzClient,
-		musixmatchClient:  musixmatchClient,
 	}
 }
 
@@ -94,7 +90,7 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	sourceId := q.Get("sourceId")
 	source := q.Get("source")
 
-	l := h.log.Sugar()
+	l := h.log
 
 	var resp GetTrackResponse
 	var err error

@@ -18,7 +18,7 @@ import (
 
 // DiscoverHandler is an http.Handler
 type DiscoverHandler struct {
-	log           *zap.Logger
+	log           *zap.SugaredLogger
 	fs            *firestore.Client
 	spotifyClient *spotify.SpotifyClient
 }
@@ -28,7 +28,7 @@ func (*DiscoverHandler) Pattern() string {
 }
 
 // NewDiscoverHandler builds a new DiscoverHandler.
-func NewDiscoverHandler(log *zap.Logger, fs *firestore.Client, spotifyClient *spotify.SpotifyClient) *DiscoverHandler {
+func NewDiscoverHandler(log *zap.SugaredLogger, fs *firestore.Client, spotifyClient *spotify.SpotifyClient) *DiscoverHandler {
 	return &DiscoverHandler{
 		log:           log,
 		fs:            fs,

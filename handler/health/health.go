@@ -11,7 +11,7 @@ import (
 // HealthHandler is an http.Handler that copies its request body
 // back to the response.
 type HealthHandler struct {
-	log           *zap.Logger
+	log           *zap.SugaredLogger
 	spotifyClient *spotify.SpotifyClient
 }
 
@@ -20,7 +20,7 @@ func (*HealthHandler) Pattern() string {
 }
 
 // NewHealthHandler builds a new HealthHandler.
-func NewHealthHandler(log *zap.Logger, spotifyClient *spotify.SpotifyClient) *HealthHandler {
+func NewHealthHandler(log *zap.SugaredLogger, spotifyClient *spotify.SpotifyClient) *HealthHandler {
 	return &HealthHandler{
 		log:           log,
 		spotifyClient: spotifyClient,

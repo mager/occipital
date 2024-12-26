@@ -9,7 +9,7 @@ import (
 )
 
 // ProvideDatabase provides a postgres client
-func ProvideDatabase(logger *zap.Logger, cfg config.Config) (*sql.DB, error) {
+func ProvideDatabase(logger *zap.SugaredLogger, cfg config.Config) (*sql.DB, error) {
 	db, err := sql.Open("postgres", cfg.DatabaseURL)
 	if err != nil {
 		logger.Error("Failed to open database connection", zap.Error(err))

@@ -15,7 +15,7 @@ import (
 
 // RecommendedTracksHandler is an http.Handler
 type RecommendedTracksHandler struct {
-	log           *zap.Logger
+	log           *zap.SugaredLogger
 	spotifyClient *spotify.SpotifyClient
 }
 
@@ -24,7 +24,7 @@ func (*RecommendedTracksHandler) Pattern() string {
 }
 
 // NewRecommendedTracksHandler builds a new RecommendedTracksHandler.
-func NewRecommendedTracksHandler(log *zap.Logger, spotifyClient *spotify.SpotifyClient) *RecommendedTracksHandler {
+func NewRecommendedTracksHandler(log *zap.SugaredLogger, spotifyClient *spotify.SpotifyClient) *RecommendedTracksHandler {
 	return &RecommendedTracksHandler{
 		log:           log,
 		spotifyClient: spotifyClient,

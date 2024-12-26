@@ -13,7 +13,7 @@ import (
 // UserHandler is an http.Handler that copies its request body
 // back to the response.
 type UserHandler struct {
-	log *zap.Logger
+	log *zap.SugaredLogger
 	db  *sql.DB
 }
 
@@ -22,7 +22,7 @@ func (*UserHandler) Pattern() string {
 }
 
 // NewUserHandler builds a new UserHandler.
-func NewUserHandler(log *zap.Logger, db *sql.DB) *UserHandler {
+func NewUserHandler(log *zap.SugaredLogger, db *sql.DB) *UserHandler {
 	return &UserHandler{
 		log: log,
 		db:  db,

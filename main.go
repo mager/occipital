@@ -21,8 +21,8 @@ import (
 	spotHandler "github.com/mager/occipital/handler/spotify"
 	trackHandler "github.com/mager/occipital/handler/track"
 	userHandler "github.com/mager/occipital/handler/user"
+	"github.com/mager/occipital/logger"
 	"github.com/mager/occipital/musicbrainz"
-	"github.com/mager/occipital/musixmatch"
 	"github.com/mager/occipital/spotify"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
@@ -50,11 +50,11 @@ func main() {
 	fx.New(
 		fx.Provide(NewHTTPServer,
 			config.Options,
+			database.Options,
+			fs.Options,
 			spotify.Options,
 			musicbrainz.Options,
-			fs.Options,
-			musixmatch.Options,
-			database.Options,
+			logger.Options,
 
 			AsRoute(health.NewHealthHandler),
 			AsRoute(userHandler.NewUserHandler),
@@ -63,8 +63,6 @@ func main() {
 			AsRoute(spotHandler.NewRecommendedTracksHandler),
 			AsRoute(trackHandler.NewGetTrackHandler),
 			AsRoute(discoverHandler.NewDiscoverHandler),
-
-			zap.NewProduction,
 		),
 		fx.Invoke(func(*http.Server) {}),
 	).Run()
@@ -72,12 +70,11 @@ func main() {
 
 func NewHTTPServer(
 	lc fx.Lifecycle,
-	logger *zap.Logger,
 	db *sql.DB,
 	fs *firestore.Client,
 	spotifyClient *spotify.SpotifyClient,
 	musicbrainzClient *musicbrainz.MusicbrainzClient,
-	musixmatchClient *musixmatch.MusixmatchClient,
+	logger *zap.SugaredLogger,
 ) *http.Server {
 	router := mux.NewRouter()
 
@@ -89,7 +86,7 @@ func NewHTTPServer(
 			if err != nil {
 				return err
 			}
-			logger.Sugar().Infof("Starting HTTP server at", srv.Addr)
+			logger.Infof("Starting HTTP server at", srv.Addr)
 			go srv.Serve(ln)
 			return nil
 		},
@@ -114,7 +111,7 @@ func NewHTTPServer(
 	spotifyRecommendedTracksHandler := spotHandler.NewRecommendedTracksHandler(logger, spotifyClient)
 	router.Handle(spotifyRecommendedTracksHandler.Pattern(), spotifyRecommendedTracksHandler)
 
-	spotifyGetTrackHandler := trackHandler.NewGetTrackHandler(logger, spotifyClient, musicbrainzClient, musixmatchClient)
+	spotifyGetTrackHandler := trackHandler.NewGetTrackHandler(logger, spotifyClient, musicbrainzClient)
 	router.Handle(spotifyGetTrackHandler.Pattern(), spotifyGetTrackHandler)
 
 	discoverHandler := discoverHandler.NewDiscoverHandler(logger, fs, spotifyClient)
@@ -145,7 +142,7 @@ var (
 )
 
 // authNMiddleware authenticates the request
-func authNMiddleware(next http.Handler, logger *zap.Logger) http.Handler {
+func authNMiddleware(next http.Handler, logger *zap.SugaredLogger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		secret := nextSecret
 		tokenString := r.Header.Get("Authorization")
@@ -165,7 +162,7 @@ func authNMiddleware(next http.Handler, logger *zap.Logger) http.Handler {
 		}
 
 		if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-			logger.Sugar().Infow("Successful authentication", "email", claims["email"])
+			logger.Infow("Successful authentication", "email", claims["email"])
 		} else {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return

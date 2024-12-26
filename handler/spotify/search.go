@@ -16,7 +16,7 @@ import (
 // SearchHandler is an http.Handler that copies its request body
 // back to the response.
 type SearchHandler struct {
-	log           *zap.Logger
+	log           *zap.SugaredLogger
 	spotifyClient *spotify.SpotifyClient
 }
 
@@ -25,7 +25,7 @@ func (*SearchHandler) Pattern() string {
 }
 
 // NewSearchHandler builds a new SearchHandler.
-func NewSearchHandler(log *zap.Logger, spotifyClient *spotify.SpotifyClient) *SearchHandler {
+func NewSearchHandler(log *zap.SugaredLogger, spotifyClient *spotify.SpotifyClient) *SearchHandler {
 	return &SearchHandler{
 		log:           log,
 		spotifyClient: spotifyClient,
@@ -74,7 +74,7 @@ func (h *SearchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.log.Sugar().Infow("search", "query", req.Query)
+	h.log.Infow("search", "query", req.Query)
 
 	results, err := h.spotifyClient.Client.Search(ctx, req.Query, spot.SearchTypeTrack)
 	if err != nil {
