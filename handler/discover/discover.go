@@ -12,6 +12,7 @@ import (
 	"github.com/mager/occipital/occipital"
 	"github.com/mager/occipital/spotify"
 	"go.uber.org/zap"
+	"golang.org/x/exp/rand"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -112,17 +113,19 @@ func (h *DiscoverHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var billboardTracks []occipital.Track
-	for _, fsTrack := range billboardTracksDoc.Tracks {
+	billboardTracks := []occipital.Track{}
+	for i, fsTrack := range billboardTracksDoc.Tracks {
+		if i >= 48 {
+			break
+		}
 		billboardTracks = append(billboardTracks, convertToOccipitalTrack(fsTrack, "spotify"))
 	}
-
 	// Fetch Hype Machine
 	hypemDoc, err := h.fs.Collection("hypem").Doc(today).Get(ctx)
 	if err != nil {
 		if status.Code(err) == codes.NotFound {
 			h.log.Warn("Document not found for today, searching for yesterday")
-			hypemDoc, err = h.fs.Collection("billboard").Doc(yesterday).Get(ctx)
+			hypemDoc, err = h.fs.Collection("hypem").Doc(yesterday).Get(ctx)
 		}
 		if err != nil {
 			h.log.Error("Error fetching document snapshot", zap.Error(err))
@@ -137,14 +140,32 @@ func (h *DiscoverHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var hypemTracks []occipital.Track
-	for _, fsTrack := range hypemTracksDoc.Tracks {
-		billboardTracks = append(billboardTracks, convertToOccipitalTrack(fsTrack, "hypem"))
+	hypemTracks := []occipital.Track{}
+	for i, fsTrack := range hypemTracksDoc.Tracks {
+		if i >= 48 {
+			break
+		}
+		hypemTracks = append(hypemTracks, convertToOccipitalTrack(fsTrack, "hypem"))
 	}
 
+	// If fewer than 48 hypem tracks, fill with additional billboard tracks
+	neededTracks := 48 - len(hypemTracks)
+	if neededTracks > 0 {
+		for i := 48; i < len(billboardTracksDoc.Tracks) && len(hypemTracks) < 48; i++ {
+			hypemTracks = append(hypemTracks, convertToOccipitalTrack(billboardTracksDoc.Tracks[i], "spotify"))
+		}
+	}
+
+	// Combine and shuffle the tracks
+	tracks := append(billboardTracks, hypemTracks...)
+	rand.Seed(uint64(time.Now().UnixNano())) // Seed the random number generator
+	rand.Shuffle(len(tracks), func(i, j int) {
+		tracks[i], tracks[j] = tracks[j], tracks[i]
+	})
+
+	// Create the response
 	resp := &DiscoverResponse{
-		Billboard: billboardTracks,
-		HypeM:     hypemTracks,
+		Tracks: tracks,
 	}
 
 	json.NewEncoder(w).Encode(resp)
