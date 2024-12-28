@@ -29,6 +29,7 @@ var (
 		"electric guitar":          "guitar",
 		"foot stomps":              "foot-stomps",
 		"double bass":              "double-bass",
+		"drum machine":             "drum-machine",
 		"Wurlitzer electric piano": "wurlitzer",
 		"Rhodes piano":             "piano",
 	}
@@ -164,7 +165,7 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// TODO: Log if there are more than 1
 	var recording mb.GetRecordingResponse
-	if recs.Count > 1 {
+	if recs.Count >= 1 {
 		getRecReq := mb.GetRecordingRequest{
 			ID:       recs.Recordings[0].ID,
 			Includes: []mb.Include{"artist-rels", "genres"},
@@ -191,16 +192,8 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Pretty print the entire recording
-		recordingJSON, err := json.MarshalIndent(recording, "", "  ")
-		if err != nil {
-			l.Errorf("error marshaling recording to JSON: %v", err)
-		} else {
-			l.Infow("got recording", zap.String("recording", string(recordingJSON)))
-		}
-
 		for _, relation := range *recording.Relations {
-			l.Infow("got relation", zap.Any("relation", relation))
+			l.Debugw("got relation", zap.Any("relation", relation))
 		}
 
 		track.Instruments = getArtistInstrumentsForRecording(recording.Recording)
