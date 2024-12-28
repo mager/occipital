@@ -163,25 +163,49 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// TODO: Log if there are more than 1
-	if recs.Count == 1 {
+	var recording mb.GetRecordingResponse
+	if recs.Count > 1 {
 		getRecReq := mb.GetRecordingRequest{
 			ID:       recs.Recordings[0].ID,
 			Includes: []mb.Include{"artist-rels", "genres"},
 		}
-		rec, err := h.musicbrainzClient.Client.GetRecording(getRecReq)
+		recording, err = h.musicbrainzClient.Client.GetRecording(getRecReq)
 		if err != nil {
 			l.Errorf("error fetching recording: %v", err)
+
+			// Attempt to fetch the second recording if available
+			if len(recs.Recordings) > 1 {
+				getRecReq.ID = recs.Recordings[1].ID
+				recording, err = h.musicbrainzClient.Client.GetRecording(getRecReq)
+				if err != nil {
+					l.Errorf("error fetching second recording: %v", err)
+				}
+			}
 		}
 
-		l.Debugw("got recording", zap.String("ID", rec.ID), zap.String("ISRC", track.ISRC))
-
-		for _, relation := range *rec.Relations {
-			l.Debugw("got relation", zap.Any("relation", relation))
+		if len(*recording.Relations) == 0 && len(recs.Recordings) > 1 {
+			getRecReq.ID = recs.Recordings[1].ID
+			recording, err = h.musicbrainzClient.Client.GetRecording(getRecReq)
+			if err != nil {
+				l.Errorf("error fetching second recording: %v", err)
+			}
 		}
 
-		track.Instruments = getArtistInstrumentsForRecording(rec.Recording)
-		track.ProductionCredits = getProductionCreditsForRecording(rec.Recording)
-		track.Genres = getGenresForRecording(rec.Recording)
+		// Pretty print the entire recording
+		recordingJSON, err := json.MarshalIndent(recording, "", "  ")
+		if err != nil {
+			l.Errorf("error marshaling recording to JSON: %v", err)
+		} else {
+			l.Infow("got recording", zap.String("recording", string(recordingJSON)))
+		}
+
+		for _, relation := range *recording.Relations {
+			l.Infow("got relation", zap.Any("relation", relation))
+		}
+
+		track.Instruments = getArtistInstrumentsForRecording(recording.Recording)
+		track.ProductionCredits = getProductionCreditsForRecording(recording.Recording)
+		track.Genres = getGenresForRecording(recording.Recording)
 	}
 
 	resp.Track = track
@@ -304,49 +328,4 @@ func getProductionCreditsForRecording(rec mb.Recording) []*occipital.TrackArtist
 	})
 
 	return artistCredits
-}
-
-// SimplifySegments reduces the number of segments by averaging over a fixed interval
-func SimplifySegments(segments []occipital.TrackAnalysisSegment, groupSize int) []occipital.TrackAnalysisSegment {
-	simplifiedSegments := []occipital.TrackAnalysisSegment{}
-	var currentGroup []occipital.TrackAnalysisSegment
-
-	for i, segment := range segments {
-		currentGroup = append(currentGroup, segment)
-
-		// Once we have enough segments for the group, process the group
-		if (i+1)%groupSize == 0 || i == len(segments)-1 {
-			avgSegment := averageGroup(currentGroup)
-			simplifiedSegments = append(simplifiedSegments, avgSegment)
-			currentGroup = []occipital.TrackAnalysisSegment{} // Reset group
-		}
-	}
-	return simplifiedSegments
-}
-
-// averageGroup calculates the average values for a group of segments
-func averageGroup(group []occipital.TrackAnalysisSegment) occipital.TrackAnalysisSegment {
-	totalDuration := 0.0
-	totalConfidence := 0.0
-	totalLoudnessMax := 0.0
-	totalLoudnessStart := 0.0
-	totalLoudnessEnd := 0.0
-
-	for _, segment := range group {
-		totalDuration += segment.Duration
-		totalConfidence += segment.Confidence
-		totalLoudnessMax += segment.LoudnessMax
-		totalLoudnessStart += segment.LoudnessStart
-		totalLoudnessEnd += segment.LoudnessEnd
-	}
-
-	groupSize := float64(len(group))
-	return occipital.TrackAnalysisSegment{
-		Duration:      totalDuration,
-		Confidence:    totalConfidence / groupSize,
-		LoudnessMax:   totalLoudnessMax / groupSize,
-		LoudnessStart: totalLoudnessStart / groupSize,
-		LoudnessEnd:   totalLoudnessEnd / groupSize,
-		Start:         group[0].Start, // Use the start of the first segment
-	}
 }
