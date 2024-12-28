@@ -31,11 +31,13 @@ var (
 		"double bass":              "double-bass",
 		"drum machine":             "drum-machine",
 		"Wurlitzer electric piano": "wurlitzer",
+		"electric piano":           "piano",
 		"Rhodes piano":             "piano",
 		"Minimoog":                 "synthesizer",
 		"Moog":                     "synthesizer",
 		"electronic instruments":   "synthesizer",
 		"sampler":                  "synthesizer",
+		"fretless bass":            "fretless-bass",
 	}
 	instrumentRankings = map[string]int{
 		"piano":    1,
@@ -210,12 +212,13 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
-func getArtistInstrumentsForRecording(rec mb.Recording) []*occipital.TrackArtistInstruments {
-	artistInstrumentMap := make(map[string][]string)
+func getArtistInstrumentsForRecording(rec mb.Recording) []*occipital.TrackInstrumentArtists {
+	// Create a map to group artists by instrument
+	instrumentMap := make(map[string]map[string]struct{})
 
+	// Iterate over relations and group artists by instrument
 	for _, relation := range *rec.Relations {
 		if relation.Type == "instrument" && len(relation.Attributes) == 1 {
-			// Get instrument name and artist name
 			instrumentName := relation.Attributes[0]
 			artistName := relation.Artist.Name
 
@@ -224,56 +227,41 @@ func getArtistInstrumentsForRecording(rec mb.Recording) []*occipital.TrackArtist
 				instrumentName = mappedInstrumentName
 			}
 
-			// Add instrument to artist map
-			if _, ok := artistInstrumentMap[artistName]; !ok {
-				artistInstrumentMap[artistName] = []string{instrumentName}
-			} else {
-				// Check if instrument already exists for this artist
-				found := false
-				for _, instrument := range artistInstrumentMap[artistName] {
-					if instrument == instrumentName {
-						found = true
-						break
-					}
-				}
-				if !found {
-					artistInstrumentMap[artistName] = append(artistInstrumentMap[artistName], instrumentName)
-				}
+			// Initialize the artist set for this instrument if not already initialized
+			if instrumentMap[instrumentName] == nil {
+				instrumentMap[instrumentName] = make(map[string]struct{})
 			}
+
+			// Add artist to the instrument map (avoiding duplicates)
+			instrumentMap[instrumentName][artistName] = struct{}{}
 		}
 	}
 
-	// Convert artistInstrumentMap to []*TrackArtistInstruments
-	artistInstruments := make([]*occipital.TrackArtistInstruments, 0, len(artistInstrumentMap))
-	for artistName, instruments := range artistInstrumentMap {
-		// Sort the instruments alphabetically
-		sort.Strings(instruments)
+	// Convert instrumentMap to a slice of TrackInstrumentArtists
+	var instrumentArtists []*occipital.TrackInstrumentArtists
+	for instrument, artistSet := range instrumentMap {
+		// Convert the set of artists to a slice
+		artists := make([]string, 0, len(artistSet))
+		for artist := range artistSet {
+			artists = append(artists, artist)
+		}
 
-		// Sort the instruments based on the predefined rankings
-		sort.SliceStable(instruments, func(i, j int) bool {
-			rankI, okI := instrumentRankings[instruments[i]]
-			rankJ, okJ := instrumentRankings[instruments[j]]
-			if !okI {
-				rankI = len(instrumentRankings) + 1
-			}
-			if !okJ {
-				rankJ = len(instrumentRankings) + 1
-			}
-			return rankI < rankJ
-		})
+		// Sort the artists alphabetically
+		sort.Strings(artists)
 
-		artistInstruments = append(artistInstruments, &occipital.TrackArtistInstruments{
-			Artist:      artistName,
-			Instruments: instruments,
+		// Create a TrackInstrumentArtists struct
+		instrumentArtists = append(instrumentArtists, &occipital.TrackInstrumentArtists{
+			Instrument: instrument,
+			Artists:    artists,
 		})
 	}
 
-	// Sort artists by the number of instruments they play
-	sort.Slice(artistInstruments, func(i, j int) bool {
-		return len(artistInstruments[i].Instruments) > len(artistInstruments[j].Instruments)
+	// Sort the instruments by the number of artists (descending)
+	sort.Slice(instrumentArtists, func(i, j int) bool {
+		return len(instrumentArtists[i].Artists) > len(instrumentArtists[j].Artists)
 	})
 
-	return artistInstruments
+	return instrumentArtists
 }
 
 func getGenresForRecording(rec mb.Recording) []string {
@@ -297,32 +285,53 @@ func getGenresForRecording(rec mb.Recording) []string {
 
 	return genres
 }
-func getProductionCreditsForRecording(rec mb.Recording) []*occipital.TrackArtistProduction {
-	artistCreditsMap := make(map[string][]string)
 
-	supportedTypes := []string{"producer", "mix", "recording"}
+func getProductionCreditsForRecording(rec mb.Recording) []*occipital.TrackProductionCredit {
+	// Create a map to group artists by credit type
+	creditMap := make(map[string][]string)
 
+	// Define supported credit types
+	supportedTypes := []string{"producer", "mix", "recording", "vocal"}
+
+	// Iterate over relations and group artists by credit type
 	for _, relation := range *rec.Relations {
 		for _, supportedType := range supportedTypes { // Check against supported types
 			if relation.Type == supportedType {
-				artistCreditsMap[relation.Artist.Name] = append(artistCreditsMap[relation.Artist.Name], relation.Type)
+				creditMap[supportedType] = append(creditMap[supportedType], relation.Artist.Name)
 			}
 		}
 	}
 
-	// Convert artistCreditsMap to []*TrackArtistProduction and sort by total number of credits
-	artistCredits := make([]*occipital.TrackArtistProduction, 0, len(artistCreditsMap))
-	for artistName, credits := range artistCreditsMap {
-		sort.Strings(credits) // Sort the credits for each artist
-		artistCredits = append(artistCredits, &occipital.TrackArtistProduction{
-			Artist:  artistName,
-			Credits: credits,
+	// Convert the creditMap to a slice of TrackProductionCredits
+	var productionCredits []*occipital.TrackProductionCredit
+	for creditType, artists := range creditMap {
+		// Remove duplicates from the artists list (optional)
+		uniqueArtists := uniqueStrings(artists)
+
+		// Append a new TrackProductionCredit with the creditType and unique artists
+		productionCredits = append(productionCredits, &occipital.TrackProductionCredit{
+			Credit:  creditType,
+			Artists: uniqueArtists,
 		})
 	}
 
-	sort.Slice(artistCredits, func(i, j int) bool {
-		return len(artistCredits[i].Credits) > len(artistCredits[j].Credits)
+	// Sort the production credits by the number of artists (descending)
+	sort.Slice(productionCredits, func(i, j int) bool {
+		return len(productionCredits[i].Artists) > len(productionCredits[j].Artists)
 	})
 
-	return artistCredits
+	return productionCredits
+}
+
+// Helper function to remove duplicate strings from a slice
+func uniqueStrings(strs []string) []string {
+	seen := make(map[string]struct{})
+	var unique []string
+	for _, str := range strs {
+		if _, exists := seen[str]; !exists {
+			seen[str] = struct{}{}
+			unique = append(unique, str)
+		}
+	}
+	return unique
 }

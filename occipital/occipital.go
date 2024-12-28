@@ -14,8 +14,8 @@ type Track struct {
 	ReleaseDate       string                    `json:"release_date"`
 	Genres            []string                  `json:"genres"`
 	ISRC              string                    `json:"isrc"`
-	Instruments       []*TrackArtistInstruments `json:"instruments"`
-	ProductionCredits []*TrackArtistProduction  `json:"production_credits"`
+	Instruments       []*TrackInstrumentArtists `json:"instruments"`
+	ProductionCredits []*TrackProductionCredit  `json:"production_credits"`
 }
 
 type TrackMeta struct {
@@ -92,9 +92,19 @@ type TrackArtistInstruments struct {
 	Instruments []string `json:"instruments"`
 }
 
+type TrackInstrumentArtists struct {
+	Artists    []string `json:"artists"`
+	Instrument string   `json:"instrument"`
+}
+
 type TrackArtistProduction struct {
 	Artist  string   `json:"artist"`
 	Credits []string `json:"credits"`
+}
+
+type TrackProductionCredit struct {
+	Credit  string   `json:"credit"`
+	Artists []string `json:"artists"`
 }
 
 type TrackAnalysis struct {
