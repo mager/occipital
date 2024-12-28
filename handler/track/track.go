@@ -32,6 +32,10 @@ var (
 		"drum machine":             "drum-machine",
 		"Wurlitzer electric piano": "wurlitzer",
 		"Rhodes piano":             "piano",
+		"Minimoog":                 "synthesizer",
+		"Moog":                     "synthesizer",
+		"electronic instruments":   "synthesizer",
+		"sampler":                  "synthesizer",
 	}
 	instrumentRankings = map[string]int{
 		"piano":    1,
