@@ -37,6 +37,8 @@ var (
 		"Moog":                     "synthesizer",
 		"electronic instruments":   "synthesizer",
 		"sampler":                  "synthesizer",
+		"tenor saxophone":          "saxophone",
+		"baritone saxophone":       "saxophone",
 		"fretless bass":            "fretless-bass",
 	}
 	instrumentRankings = map[string]int{
