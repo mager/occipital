@@ -176,7 +176,7 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if recs.Count >= 1 {
 		getRecReq := mb.GetRecordingRequest{
 			ID:       recs.Recordings[0].ID,
-			Includes: []mb.Include{"artist-rels", "genres"},
+			Includes: []mb.Include{"artist-rels", "genres", "work-rels"},
 		}
 		recording, err = h.musicbrainzClient.Client.GetRecording(getRecReq)
 		if err != nil {
@@ -207,6 +207,13 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		track.Instruments = getArtistInstrumentsForRecording(recording.Recording)
 		track.ProductionCredits = getProductionCreditsForRecording(recording.Recording)
 		track.Genres = getGenresForRecording(recording.Recording)
+
+		// If a work exists, get the song credits
+
+		work := h.getWorkFromRecording(recording.Recording)
+		if work != nil {
+			track.SongCredits = getSongCreditsForWork(*work)
+		}
 	}
 
 	resp.Track = track
@@ -289,25 +296,20 @@ func getGenresForRecording(rec mb.Recording) []string {
 }
 
 func getProductionCreditsForRecording(rec mb.Recording) []*occipital.TrackProductionCredit {
-	// Create a map to group artists by credit type
 	creditMap := make(map[string][]string)
 
-	// Define supported credit types
 	supportedTypes := []string{"producer", "mix", "recording", "vocal"}
 
-	// Iterate over relations and group artists by credit type
 	for _, relation := range *rec.Relations {
-		for _, supportedType := range supportedTypes { // Check against supported types
+		for _, supportedType := range supportedTypes {
 			if relation.Type == supportedType {
 				creditMap[supportedType] = append(creditMap[supportedType], relation.Artist.Name)
 			}
 		}
 	}
 
-	// Convert the creditMap to a slice of TrackProductionCredits
 	var productionCredits []*occipital.TrackProductionCredit
 	for creditType, artists := range creditMap {
-		// Remove duplicates from the artists list (optional)
 		uniqueArtists := uniqueStrings(artists)
 
 		// Append a new TrackProductionCredit with the creditType and unique artists
@@ -336,4 +338,48 @@ func uniqueStrings(strs []string) []string {
 		}
 	}
 	return unique
+}
+
+func getSongCreditsForWork(rec mb.Work) []*occipital.TrackSongCredit {
+	creditMap := make(map[string][]string)
+
+	supportedTypes := []string{"composer", "lyricist", "writer"}
+	for _, relation := range *rec.Relations {
+		for _, supportedType := range supportedTypes {
+			if relation.Type == supportedType {
+				creditMap[supportedType] = append(creditMap[supportedType], relation.Artist.Name)
+			}
+		}
+	}
+
+	var songCredits []*occipital.TrackSongCredit
+	for creditType, artists := range creditMap {
+		uniqueArtists := uniqueStrings(artists)
+
+		// Append a new TrackSongCredit with the creditType and unique artists
+		songCredits = append(songCredits, &occipital.TrackSongCredit{
+			Credit:  creditType,
+			Artists: uniqueArtists,
+		})
+	}
+
+	return songCredits
+}
+
+func (h *GetTrackHandler) getWorkFromRecording(rec mb.Recording) *mb.Work {
+	for _, relation := range *rec.Relations {
+		if relation.TargetType == "work" {
+			work, err := h.musicbrainzClient.Client.GetWork(mb.GetWorkRequest{
+				ID:       relation.Work.ID,
+				Includes: []mb.Include{"artist-rels", "url-rels"},
+			})
+			if err != nil {
+				h.log.Errorf("error fetching work: %v", err)
+				return nil
+			}
+			return &work.Work
+		}
+	}
+
+	return nil
 }

@@ -16,6 +16,7 @@ type Track struct {
 	ISRC              string                    `json:"isrc"`
 	Instruments       []*TrackInstrumentArtists `json:"instruments"`
 	ProductionCredits []*TrackProductionCredit  `json:"production_credits"`
+	SongCredits       []*TrackSongCredit        `json:"song_credits"`
 }
 
 type TrackMeta struct {
@@ -103,6 +104,11 @@ type TrackArtistProduction struct {
 }
 
 type TrackProductionCredit struct {
+	Credit  string   `json:"credit"`
+	Artists []string `json:"artists"`
+}
+
+type TrackSongCredit struct {
 	Credit  string   `json:"credit"`
 	Artists []string `json:"artists"`
 }
