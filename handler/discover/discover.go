@@ -38,20 +38,22 @@ func NewDiscoverHandler(log *zap.SugaredLogger, fs *firestore.Client, spotifyCli
 }
 
 type DiscoverRequest struct {
+	Popular int `json:"popular"`
 }
 
 type DiscoverResponse struct {
-	Tracks    []occipital.Track `json:"tracks"`
-	Billboard []occipital.Track `json:"billboard"`
-	HypeM     []occipital.Track `json:"hypem"`
+	Tracks []occipital.Track `json:"tracks"`
 }
 
 // Function to convert fsClient.Track to occipital.Track
 func convertToOccipitalTrack(fsTrack fsClient.Track, thumbType string) occipital.Track {
 	var image string
-	if thumbType == "hypem" {
+	switch thumbType {
+	case "hypem":
 		image = getHypemThumb(fsTrack.Thumb)
-	} else {
+	case "hnhh":
+		image = getHnhhThumb(fsTrack.Thumb)
+	default:
 		image = getSpotifyThumb(fsTrack.Thumb)
 	}
 	return occipital.Track{
@@ -69,6 +71,10 @@ func getSpotifyThumb(th string) string {
 
 func getHypemThumb(th string) string {
 	return fmt.Sprintf("https://static.hypem.com/items_images/%s", th)
+}
+
+func getHnhhThumb(th string) string {
+	return getSpotifyThumb(th)
 }
 
 // Discover
@@ -89,84 +95,99 @@ func (h *DiscoverHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sources := []struct {
+		name      string
+		thumbType string
+	}{
+		{"billboard", "spotify"},
+		{"hypem", "hypem"},
+		{"hnhh", "hnhh"},
+	}
+
+	var allTracks []occipital.Track
 	now := time.Now()
 	today := now.Format("2006-01-02")
 	yesterday := now.AddDate(0, 0, -1).Format("2006-01-02")
 
-	// Fetch Billboard
-	billboardDoc, err := h.fs.Collection("billboard").Doc(today).Get(ctx)
-	if err != nil {
-		if status.Code(err) == codes.NotFound {
-			h.log.Warn("Document not found for today, searching for yesterday")
-			billboardDoc, err = h.fs.Collection("billboard").Doc(yesterday).Get(ctx)
+	maxTotalTracks := 100
+	billboardPercentage := req.Popular
+	if billboardPercentage < 0 {
+		billboardPercentage = 0
+	} else if billboardPercentage > 100 {
+		billboardPercentage = 100
+	}
+
+	billboardMaxTracks := maxTotalTracks * billboardPercentage / 100
+	otherMaxTracks := (maxTotalTracks - billboardMaxTracks) / (len(sources) - 1)
+
+	for _, source := range sources {
+		var maxTracks int
+		if source.name == "billboard" {
+			maxTracks = billboardMaxTracks
+		} else {
+			maxTracks = otherMaxTracks
 		}
+
+		tracks, err := h.fetchTracksFromSource(ctx, today, yesterday, source.name, source.thumbType)
 		if err != nil {
-			h.log.Error("Error fetching document snapshot", zap.Error(err))
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			h.log.Error("Error fetching tracks", zap.Error(err), zap.String("source", source.name))
+			http.Error(w, "Failed to fetch tracks", http.StatusInternalServerError)
 			return
 		}
-	}
-	var billboardTracksDoc fsClient.TracksDoc
-	if err := billboardDoc.DataTo(&billboardTracksDoc); err != nil {
-		h.log.Error("Error converting document snapshot to tracks", zap.Error(err))
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		if len(tracks) > maxTracks {
+			tracks = tracks[:maxTracks]
+		}
+		allTracks = append(allTracks, tracks...)
 	}
 
-	billboardTracks := []occipital.Track{}
-	for i, fsTrack := range billboardTracksDoc.Tracks {
-		if i >= 48 {
-			break
-		}
-		billboardTracks = append(billboardTracks, convertToOccipitalTrack(fsTrack, "spotify"))
-	}
-	// Fetch Hype Machine
-	hypemDoc, err := h.fs.Collection("hypem").Doc(today).Get(ctx)
-	if err != nil {
-		if status.Code(err) == codes.NotFound {
-			h.log.Warn("Document not found for today, searching for yesterday")
-			hypemDoc, err = h.fs.Collection("hypem").Doc(yesterday).Get(ctx)
-		}
-		if err != nil {
-			h.log.Error("Error fetching document snapshot", zap.Error(err))
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-	}
-	var hypemTracksDoc fsClient.TracksDoc
-	if err := hypemDoc.DataTo(&hypemTracksDoc); err != nil {
-		h.log.Error("Error converting document snapshot to tracks", zap.Error(err))
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	hypemTracks := []occipital.Track{}
-	for i, fsTrack := range hypemTracksDoc.Tracks {
-		if i >= 48 {
-			break
-		}
-		hypemTracks = append(hypemTracks, convertToOccipitalTrack(fsTrack, "hypem"))
-	}
-
-	// If fewer than 48 hypem tracks, fill with additional billboard tracks
-	neededTracks := 48 - len(hypemTracks)
-	if neededTracks > 0 {
-		for i := 48; i < len(billboardTracksDoc.Tracks) && len(hypemTracks) < 48; i++ {
-			hypemTracks = append(hypemTracks, convertToOccipitalTrack(billboardTracksDoc.Tracks[i], "spotify"))
-		}
-	}
-
-	// Combine and shuffle the tracks
-	tracks := append(billboardTracks, hypemTracks...)
-	rand.Seed(uint64(time.Now().UnixNano())) // Seed the random number generator
-	rand.Shuffle(len(tracks), func(i, j int) {
-		tracks[i], tracks[j] = tracks[j], tracks[i]
+	rand.Shuffle(len(allTracks), func(i, j int) {
+		allTracks[i], allTracks[j] = allTracks[j], allTracks[i]
 	})
 
-	// Create the response
-	resp := &DiscoverResponse{
-		Tracks: tracks,
+	// Limit to a maximum of 100 tracks
+	if len(allTracks) > maxTotalTracks {
+		allTracks = allTracks[:maxTotalTracks]
 	}
 
-	json.NewEncoder(w).Encode(resp)
+	resp := &DiscoverResponse{
+		Tracks: allTracks,
+	}
+
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		h.log.Error("Error encoding response", zap.Error(err))
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+	}
+}
+
+func (h *DiscoverHandler) fetchTracksFromSource(ctx context.Context, today, yesterday, collectionName, thumbType string) ([]occipital.Track, error) {
+	tracksDoc, err := h.fetchTracksFromCollection(ctx, today, yesterday, collectionName)
+	if err != nil {
+		return nil, err
+	}
+	tracks := make([]occipital.Track, 0, len(tracksDoc))
+	for _, fsTrack := range tracksDoc {
+		tracks = append(tracks, convertToOccipitalTrack(fsTrack, thumbType))
+	}
+	return tracks, nil
+}
+
+func (h *DiscoverHandler) fetchTracksFromCollection(ctx context.Context, today, yesterday, collectionName string) ([]fsClient.Track, error) {
+	col := h.fs.Collection(collectionName)
+	doc, err := col.Doc(today).Get(ctx)
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			h.log.Warnf("Document not found for today in collection '%s', searching for yesterday", collectionName)
+			doc, err = col.Doc(yesterday).Get(ctx)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("error fetching document snapshot from collection '%s': %w", collectionName, err)
+		}
+	}
+
+	var tracksDoc fsClient.TracksDoc
+	if err := doc.DataTo(&tracksDoc); err != nil {
+		return nil, fmt.Errorf("error converting document snapshot to tracks for collection '%s': %w", collectionName, err)
+	}
+
+	return tracksDoc.Tracks, nil
 }
