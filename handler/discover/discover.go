@@ -42,7 +42,8 @@ type DiscoverRequest struct {
 }
 
 type DiscoverResponse struct {
-	Tracks []occipital.Track `json:"tracks"`
+	Tracks  []occipital.Track `json:"tracks"`
+	Updated string            `json:"updated"`
 }
 
 // Function to convert fsClient.Track to occipital.Track
@@ -120,6 +121,7 @@ func (h *DiscoverHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	billboardMaxTracks := maxTotalTracks * billboardPercentage / 100
 	otherMaxTracks := (maxTotalTracks - billboardMaxTracks) / (len(sources) - 1)
 
+	var latestDate string
 	for _, source := range sources {
 		var maxTracks int
 		if source.name == "billboard" {
@@ -128,7 +130,7 @@ func (h *DiscoverHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			maxTracks = otherMaxTracks
 		}
 
-		tracks, err := h.fetchTracksFromSource(ctx, today, yesterday, source.name, source.thumbType)
+		tracks, dateUsed, err := h.fetchTracksFromSource(ctx, today, yesterday, source.name, source.thumbType)
 		if err != nil {
 			h.log.Error("Error fetching tracks", zap.Error(err), zap.String("source", source.name))
 			http.Error(w, "Failed to fetch tracks", http.StatusInternalServerError)
@@ -138,6 +140,11 @@ func (h *DiscoverHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			tracks = tracks[:maxTracks]
 		}
 		allTracks = append(allTracks, tracks...)
+
+		// Update the latest date used
+		if dateUsed > latestDate {
+			latestDate = dateUsed
+		}
 	}
 
 	rand.Shuffle(len(allTracks), func(i, j int) {
@@ -150,7 +157,8 @@ func (h *DiscoverHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := &DiscoverResponse{
-		Tracks: allTracks,
+		Tracks:  allTracks,
+		Updated: latestDate,
 	}
 
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
@@ -159,35 +167,39 @@ func (h *DiscoverHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *DiscoverHandler) fetchTracksFromSource(ctx context.Context, today, yesterday, collectionName, thumbType string) ([]occipital.Track, error) {
-	tracksDoc, err := h.fetchTracksFromCollection(ctx, today, yesterday, collectionName)
+func (h *DiscoverHandler) fetchTracksFromSource(ctx context.Context, today, yesterday, collectionName, thumbType string) ([]occipital.Track, string, error) {
+	tracksDoc, dateUsed, err := h.fetchTracksFromCollection(ctx, today, yesterday, collectionName)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	tracks := make([]occipital.Track, 0, len(tracksDoc))
 	for _, fsTrack := range tracksDoc {
 		tracks = append(tracks, convertToOccipitalTrack(fsTrack, thumbType))
 	}
-	return tracks, nil
+	return tracks, dateUsed, nil
 }
 
-func (h *DiscoverHandler) fetchTracksFromCollection(ctx context.Context, today, yesterday, collectionName string) ([]fsClient.Track, error) {
+func (h *DiscoverHandler) fetchTracksFromCollection(ctx context.Context, today, yesterday, collectionName string) ([]fsClient.Track, string, error) {
 	col := h.fs.Collection(collectionName)
 	doc, err := col.Doc(today).Get(ctx)
 	if err != nil {
 		if status.Code(err) == codes.NotFound {
 			h.log.Warnf("Document not found for today in collection '%s', searching for yesterday", collectionName)
 			doc, err = col.Doc(yesterday).Get(ctx)
+			if err != nil {
+				return nil, "", fmt.Errorf("error fetching document snapshot from collection '%s': %w", collectionName, err)
+			}
+			return h.extractTracks(doc, yesterday)
 		}
-		if err != nil {
-			return nil, fmt.Errorf("error fetching document snapshot from collection '%s': %w", collectionName, err)
-		}
+		return nil, "", fmt.Errorf("error fetching document snapshot from collection '%s': %w", collectionName, err)
 	}
+	return h.extractTracks(doc, today)
+}
 
+func (h *DiscoverHandler) extractTracks(doc *firestore.DocumentSnapshot, date string) ([]fsClient.Track, string, error) {
 	var tracksDoc fsClient.TracksDoc
 	if err := doc.DataTo(&tracksDoc); err != nil {
-		return nil, fmt.Errorf("error converting document snapshot to tracks for collection '%s': %w", collectionName, err)
+		return nil, "", fmt.Errorf("error converting document snapshot to tracks: %w", err)
 	}
-
-	return tracksDoc.Tracks, nil
+	return tracksDoc.Tracks, date, nil
 }
