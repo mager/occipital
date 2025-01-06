@@ -96,6 +96,8 @@ func (h *DiscoverHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.log.Info("Discover request received", zap.Int("popularPercentage", req.Popular))
+
 	sources := []struct {
 		name      string
 		thumbType string
@@ -121,8 +123,12 @@ func (h *DiscoverHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	billboardMaxTracks := maxTotalTracks * billboardPercentage / 100
 	otherMaxTracks := (maxTotalTracks - billboardMaxTracks) / (len(sources) - 1)
 
+	h.log.Info("Track allocation", zap.Int("billboardMaxTracks", billboardMaxTracks), zap.Int("otherMaxTracks", otherMaxTracks))
+
 	var latestDate string
 	for _, source := range sources {
+		h.log.Info("Fetching tracks from source", zap.String("source", source.name), zap.String("thumbType", source.thumbType))
+
 		var maxTracks int
 		if source.name == "billboard" {
 			maxTracks = billboardMaxTracks
@@ -132,17 +138,19 @@ func (h *DiscoverHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		tracks, dateUsed, err := h.fetchTracksFromSource(ctx, today, yesterday, source.name, source.thumbType)
 		if err != nil {
-			h.log.Error("Error fetching tracks", zap.Error(err), zap.String("source", source.name))
+			h.log.Error("Error fetching tracks from source", zap.String("source", source.name), zap.Error(err))
 			http.Error(w, "Failed to fetch tracks", http.StatusInternalServerError)
 			return
 		}
+
 		if len(tracks) > maxTracks {
+			h.log.Info("Limiting tracks to max allowed", zap.Int("maxTracks", maxTracks), zap.Int("trackCount", len(tracks)))
 			tracks = tracks[:maxTracks]
 		}
 		allTracks = append(allTracks, tracks...)
 
-		// Update the latest date used
 		if dateUsed > latestDate {
+			h.log.Info("Updating latest date", zap.String("previousLatestDate", latestDate), zap.String("newDateUsed", dateUsed))
 			latestDate = dateUsed
 		}
 	}
@@ -151,8 +159,8 @@ func (h *DiscoverHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		allTracks[i], allTracks[j] = allTracks[j], allTracks[i]
 	})
 
-	// Limit to a maximum of 100 tracks
 	if len(allTracks) > maxTotalTracks {
+		h.log.Info("Limiting total tracks to max allowed", zap.Int("maxTotalTracks", maxTotalTracks), zap.Int("trackCount", len(allTracks)))
 		allTracks = allTracks[:maxTotalTracks]
 	}
 
@@ -165,6 +173,8 @@ func (h *DiscoverHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.log.Error("Error encoding response", zap.Error(err))
 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 	}
+
+	h.log.Info("Response successfully sent", zap.String("latestDate", latestDate), zap.Int("totalTracks", len(allTracks)))
 }
 
 func (h *DiscoverHandler) fetchTracksFromSource(ctx context.Context, today, yesterday, collectionName, thumbType string) ([]occipital.Track, string, error) {
@@ -181,25 +191,35 @@ func (h *DiscoverHandler) fetchTracksFromSource(ctx context.Context, today, yest
 
 func (h *DiscoverHandler) fetchTracksFromCollection(ctx context.Context, today, yesterday, collectionName string) ([]fsClient.Track, string, error) {
 	col := h.fs.Collection(collectionName)
+
+	h.log.Info("Fetching today's document", zap.String("collection", collectionName), zap.String("date", today))
 	doc, err := col.Doc(today).Get(ctx)
 	if err != nil {
 		if status.Code(err) == codes.NotFound {
-			h.log.Warnf("Document not found for today in collection '%s', searching for yesterday", collectionName)
+			h.log.Warn("Today's document not found, attempting yesterday", zap.String("collection", collectionName), zap.String("date", yesterday))
 			doc, err = col.Doc(yesterday).Get(ctx)
 			if err != nil {
+				h.log.Error("Failed to fetch yesterday's document", zap.String("collection", collectionName), zap.Error(err))
 				return nil, "", fmt.Errorf("error fetching document snapshot from collection '%s': %w", collectionName, err)
 			}
+			h.log.Info("Successfully fetched yesterday's document", zap.String("collection", collectionName), zap.String("date", yesterday))
 			return h.extractTracks(doc, yesterday)
 		}
+		h.log.Error("Error fetching today's document", zap.String("collection", collectionName), zap.Error(err))
 		return nil, "", fmt.Errorf("error fetching document snapshot from collection '%s': %w", collectionName, err)
 	}
+
+	h.log.Info("Successfully fetched today's document", zap.String("collection", collectionName), zap.String("date", today))
 	return h.extractTracks(doc, today)
 }
 
 func (h *DiscoverHandler) extractTracks(doc *firestore.DocumentSnapshot, date string) ([]fsClient.Track, string, error) {
+	h.log.Info("Extracting tracks from document", zap.String("date", date))
 	var tracksDoc fsClient.TracksDoc
 	if err := doc.DataTo(&tracksDoc); err != nil {
+		h.log.Error("Failed to convert document to tracks", zap.String("date", date), zap.Error(err))
 		return nil, "", fmt.Errorf("error converting document snapshot to tracks: %w", err)
 	}
+	h.log.Info("Tracks successfully extracted", zap.Int("trackCount", len(tracksDoc.Tracks)), zap.String("date", date))
 	return tracksDoc.Tracks, date, nil
 }
