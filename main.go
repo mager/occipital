@@ -117,6 +117,11 @@ func NewHTTPServer(
 	discoverHandler := discoverHandler.NewDiscoverHandler(logger, fs, spotifyClient)
 	router.Handle(discoverHandler.Pattern(), discoverHandler)
 
+	// websocket handler
+	router.HandleFunc("/np", func(w http.ResponseWriter, r *http.Request) {
+		spotHandler.PlayerHandler(w, r, spotifyClient, logger)
+	})
+
 	return srv
 }
 

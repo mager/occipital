@@ -127,8 +127,6 @@ func (h *DiscoverHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var latestDate string
 	for _, source := range sources {
-		h.log.Info("Fetching tracks from source", zap.String("source", source.name), zap.String("thumbType", source.thumbType))
-
 		var maxTracks int
 		if source.name == "billboard" {
 			maxTracks = billboardMaxTracks
@@ -144,13 +142,11 @@ func (h *DiscoverHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if len(tracks) > maxTracks {
-			h.log.Info("Limiting tracks to max allowed", zap.Int("maxTracks", maxTracks), zap.Int("trackCount", len(tracks)))
 			tracks = tracks[:maxTracks]
 		}
 		allTracks = append(allTracks, tracks...)
 
 		if dateUsed > latestDate {
-			h.log.Info("Updating latest date", zap.String("previousLatestDate", latestDate), zap.String("newDateUsed", dateUsed))
 			latestDate = dateUsed
 		}
 	}
@@ -160,7 +156,6 @@ func (h *DiscoverHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if len(allTracks) > maxTotalTracks {
-		h.log.Info("Limiting total tracks to max allowed", zap.Int("maxTotalTracks", maxTotalTracks), zap.Int("trackCount", len(allTracks)))
 		allTracks = allTracks[:maxTotalTracks]
 	}
 
@@ -173,8 +168,6 @@ func (h *DiscoverHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.log.Error("Error encoding response", zap.Error(err))
 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 	}
-
-	h.log.Info("Response successfully sent", zap.String("latestDate", latestDate), zap.Int("totalTracks", len(allTracks)))
 }
 
 func (h *DiscoverHandler) fetchTracksFromSource(ctx context.Context, today, yesterday, collectionName, thumbType string) ([]occipital.Track, string, error) {
@@ -192,7 +185,6 @@ func (h *DiscoverHandler) fetchTracksFromSource(ctx context.Context, today, yest
 func (h *DiscoverHandler) fetchTracksFromCollection(ctx context.Context, today, yesterday, collectionName string) ([]fsClient.Track, string, error) {
 	col := h.fs.Collection(collectionName)
 
-	h.log.Info("Fetching today's document", zap.String("collection", collectionName), zap.String("date", today))
 	doc, err := col.Doc(today).Get(ctx)
 	if err != nil {
 		if status.Code(err) == codes.NotFound {
@@ -202,24 +194,20 @@ func (h *DiscoverHandler) fetchTracksFromCollection(ctx context.Context, today, 
 				h.log.Error("Failed to fetch yesterday's document", zap.String("collection", collectionName), zap.Error(err))
 				return nil, "", fmt.Errorf("error fetching document snapshot from collection '%s': %w", collectionName, err)
 			}
-			h.log.Info("Successfully fetched yesterday's document", zap.String("collection", collectionName), zap.String("date", yesterday))
 			return h.extractTracks(doc, yesterday)
 		}
 		h.log.Error("Error fetching today's document", zap.String("collection", collectionName), zap.Error(err))
 		return nil, "", fmt.Errorf("error fetching document snapshot from collection '%s': %w", collectionName, err)
 	}
 
-	h.log.Info("Successfully fetched today's document", zap.String("collection", collectionName), zap.String("date", today))
 	return h.extractTracks(doc, today)
 }
 
 func (h *DiscoverHandler) extractTracks(doc *firestore.DocumentSnapshot, date string) ([]fsClient.Track, string, error) {
-	h.log.Info("Extracting tracks from document", zap.String("date", date))
 	var tracksDoc fsClient.TracksDoc
 	if err := doc.DataTo(&tracksDoc); err != nil {
 		h.log.Error("Failed to convert document to tracks", zap.String("date", date), zap.Error(err))
 		return nil, "", fmt.Errorf("error converting document snapshot to tracks: %w", err)
 	}
-	h.log.Info("Tracks successfully extracted", zap.Int("trackCount", len(tracksDoc.Tracks)), zap.String("date", date))
 	return tracksDoc.Tracks, date, nil
 }
