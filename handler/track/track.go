@@ -97,7 +97,6 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	q := r.URL.Query()
 	sourceId := q.Get("sourceId")
-	source := q.Get("source")
 
 	l := h.log
 
@@ -138,14 +137,11 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var track occipital.Track
-	track.Name = fullTrack.Name
-	track.Artist = util.GetFirstArtist(fullTrack.Artists)
-	track.SourceID = sourceId
-	track.Source = source
-	track.Image = *util.GetThumb(fullTrack.Album)
-	track.ReleaseDate = *util.GetReleaseDate(fullTrack.Album)
-
+	track := mapInitialTrack(r, fullTrack)
+	if track.ISRC == "" {
+		resp.Track = track
+		json.NewEncoder(w).Encode(resp)
+	}
 	artistIDs := make([]spot.ID, 0, len(fullTrack.Artists))
 	for _, artist := range fullTrack.Artists {
 		artistIDs = append(artistIDs, spot.ID(artist.ID))
@@ -154,13 +150,8 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		l.Errorf("error fetching artist: %v", err)
 	}
-
 	track.Genres = util.GetGenresForArtists(artists)
-	track.ISRC = *util.GetISRC(fullTrack)
-	if track.ISRC == "" {
-		resp.Track = track
-		json.NewEncoder(w).Encode(resp)
-	}
+
 
 	// Call Musicbrainz to get the list of instruments for the track
 	searchRecsReq := mb.SearchRecordingsByISRCRequest{
@@ -382,4 +373,20 @@ func (h *GetTrackHandler) getWorkFromRecording(rec mb.Recording) *mb.Work {
 	}
 
 	return nil
+}
+
+func mapInitialTrack(r *http.Request, ft *spot.FullTrack) occipital.Track {
+	var track occipital.Track
+	q := r.URL.Query()
+	sourceId := q.Get("sourceId")
+	source := q.Get("source")
+
+	track.Name = ft.Name
+	track.Artist = util.GetFirstArtist(ft.Artists)
+	track.SourceID = sourceId
+	track.Source = source
+	track.Image = *util.GetThumb(ft.Album)
+	track.ReleaseDate = *util.GetReleaseDate(ft.Album)
+	track.ISRC = *util.GetISRC(ft)
+	return track
 }
