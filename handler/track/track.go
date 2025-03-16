@@ -152,7 +152,6 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	track.Genres = util.GetGenresForArtists(artists)
 
-
 	// Call Musicbrainz to get the list of instruments for the track
 	searchRecsReq := mb.SearchRecordingsByISRCRequest{
 		ISRC: track.ISRC,

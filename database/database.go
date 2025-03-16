@@ -22,7 +22,6 @@ func ProvideDatabase(logger *zap.SugaredLogger, cfg config.Config) (*sql.DB, err
 		return nil, err
 	}
 
-	logger.Info("Successfully connected to database", zap.String("database", cfg.DatabaseURL))
 	return db, nil
 }
 
