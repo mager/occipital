@@ -2,9 +2,9 @@ package firestore
 
 import (
 	"context"
-	"log"
 
 	"cloud.google.com/go/firestore"
+	"go.uber.org/zap"
 )
 
 type TracksDoc struct {
@@ -20,12 +20,12 @@ type Track struct {
 }
 
 // ProvideDB provides a firestore client
-func ProvideDB() *firestore.Client {
+func ProvideDB(logger *zap.SugaredLogger) *firestore.Client {
 	projectID := "beatbrain-dev"
 
 	client, err := firestore.NewClient(context.TODO(), projectID)
 	if err != nil {
-		log.Fatalf("Failed to create client: %v", err)
+		logger.Error("Failed to create Firestore client", zap.Error(err))
 	}
 	return client
 }
