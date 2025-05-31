@@ -152,6 +152,17 @@ func (h *DiscoverHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Deduplicate tracks by artist
+	uniqueTracks := make([]occipital.Track, 0, len(allTracks))
+	artistSeen := make(map[string]bool)
+	for _, track := range allTracks {
+		if !artistSeen[track.Artist] {
+			uniqueTracks = append(uniqueTracks, track)
+			artistSeen[track.Artist] = true
+		}
+	}
+	allTracks = uniqueTracks
+
 	rand.Shuffle(len(allTracks), func(i, j int) {
 		allTracks[i], allTracks[j] = allTracks[j], allTracks[i]
 	})
