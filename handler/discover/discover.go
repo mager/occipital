@@ -103,9 +103,7 @@ func (h *DiscoverHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.log.Infow("Discover request received", "mode", req.Mode)
-
-	maxTotalTracks := 100
+	maxTotalTracks := 150
 	var sources []sourceConfig
 	var tracksPerSource map[string]int
 
@@ -120,11 +118,6 @@ func (h *DiscoverHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		sources = []sourceConfig{{"billboard", "spotify"}, {"hypem", "hypem"}, {"hnhh", "hnhh"}}
 		tracksPerSource = map[string]int{"billboard": maxTotalTracks / 3, "hypem": maxTotalTracks / 3, "hnhh": maxTotalTracks / 3}
 	}
-
-	h.log.Infow(
-		"Track allocation",
-		"tracksPerSource", tracksPerSource,
-	)
 
 	var allTracks []occipital.Track
 	now := time.Now()
@@ -175,6 +168,15 @@ func (h *DiscoverHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Tracks:  allTracks,
 		Updated: latestDate,
 	}
+
+	// Log final request details
+	h.log.Infow(
+		"Discover request finished",
+		"mode", req.Mode,
+		"tracksPerSource", tracksPerSource,
+		"totalTracks", len(allTracks),
+		"updatedDate", latestDate,
+	)
 
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		h.log.Error("Error encoding response", zap.Error(err))
