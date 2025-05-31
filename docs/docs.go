@@ -29,6 +29,17 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "summary": "Home page",
+                "parameters": [
+                    {
+                        "description": "Request parameters",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/discover.DiscoverRequest"
+                        }
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -232,6 +243,14 @@ const docTemplate = `{
                 },
                 "username": {
                     "type": "string"
+                }
+            }
+        },
+        "discover.DiscoverRequest": {
+            "type": "object",
+            "properties": {
+                "popular": {
+                    "type": "integer"
                 }
             }
         },

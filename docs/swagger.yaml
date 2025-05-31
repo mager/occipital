@@ -7,6 +7,11 @@ definitions:
       username:
         type: string
     type: object
+  discover.DiscoverRequest:
+    properties:
+      popular:
+        type: integer
+    type: object
   discover.DiscoverResponse:
     properties:
       tracks:
@@ -331,6 +336,13 @@ paths:
       consumes:
       - application/json
       description: Get the best content
+      parameters:
+      - description: Request parameters
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/discover.DiscoverRequest'
       produces:
       - application/json
       responses:

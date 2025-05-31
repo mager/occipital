@@ -83,6 +83,7 @@ func getHnhhThumb(th string) string {
 // @Description Get the best content
 // @Accept json
 // @Produce json
+// @Param request body DiscoverRequest true "Request parameters"
 // @Success 200 {object} DiscoverResponse
 // @Router /discover [post]
 func (h *DiscoverHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
