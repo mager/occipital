@@ -38,12 +38,18 @@ func NewDiscoverHandler(log *zap.SugaredLogger, fs *firestore.Client, spotifyCli
 }
 
 type DiscoverRequest struct {
-	Popular int `json:"popular"`
+	Mode string `json:"mode"`
 }
 
 type DiscoverResponse struct {
 	Tracks  []occipital.Track `json:"tracks"`
 	Updated string            `json:"updated"`
+}
+
+// Define a named struct for source configuration
+type sourceConfig struct {
+	name      string
+	thumbType string
 }
 
 // Function to convert fsClient.Track to occipital.Track
@@ -97,43 +103,37 @@ func (h *DiscoverHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.log.Info("Discover request received", zap.Int("popularPercentage", req.Popular))
+	h.log.Infow("Discover request received", "mode", req.Mode)
 
-	sources := []struct {
-		name      string
-		thumbType string
-	}{
-		{"billboard", "spotify"},
-		{"hypem", "hypem"},
-		{"hnhh", "hnhh"},
+	maxTotalTracks := 100
+	var sources []sourceConfig
+	var tracksPerSource map[string]int
+
+	switch req.Mode {
+	case "hot":
+		sources = []sourceConfig{{"billboard", "spotify"}}
+		tracksPerSource = map[string]int{"billboard": maxTotalTracks}
+	case "new":
+		sources = []sourceConfig{{"hypem", "hypem"}, {"hnhh", "hnhh"}}
+		tracksPerSource = map[string]int{"hypem": maxTotalTracks / 2, "hnhh": maxTotalTracks / 2}
+	default:
+		sources = []sourceConfig{{"billboard", "spotify"}, {"hypem", "hypem"}, {"hnhh", "hnhh"}}
+		tracksPerSource = map[string]int{"billboard": maxTotalTracks / 3, "hypem": maxTotalTracks / 3, "hnhh": maxTotalTracks / 3}
 	}
+
+	h.log.Infow(
+		"Track allocation",
+		"tracksPerSource", tracksPerSource,
+	)
 
 	var allTracks []occipital.Track
 	now := time.Now()
 	today := now.Format("2006-01-02")
 	yesterday := now.AddDate(0, 0, -1).Format("2006-01-02")
 
-	maxTotalTracks := 100
-	billboardPercentage := req.Popular
-	if billboardPercentage < 0 {
-		billboardPercentage = 0
-	} else if billboardPercentage > 100 {
-		billboardPercentage = 100
-	}
-
-	billboardMaxTracks := maxTotalTracks * billboardPercentage / 100
-	otherMaxTracks := (maxTotalTracks - billboardMaxTracks) / (len(sources) - 1)
-
-	h.log.Info("Track allocation", zap.Int("billboardMaxTracks", billboardMaxTracks), zap.Int("otherMaxTracks", otherMaxTracks))
-
 	var latestDate string
 	for _, source := range sources {
-		var maxTracks int
-		if source.name == "billboard" {
-			maxTracks = billboardMaxTracks
-		} else {
-			maxTracks = otherMaxTracks
-		}
+		maxTracks := tracksPerSource[source.name]
 
 		tracks, dateUsed, err := h.fetchTracksFromSource(ctx, today, yesterday, source.name, source.thumbType)
 		if err != nil {
