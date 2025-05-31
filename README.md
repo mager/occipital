@@ -36,6 +36,14 @@ Spotify creds:
 
 - [mager/musicbrainz-go](https://github.com/mager/musicbrainz-go)
 
+## Generate OpenAPI
+
+```
+go install github.com/swaggo/swag/cmd/swag@latest
+npm i -g openapi-to-postmanv2
+make openapi
+```
+
 ### Endpoints
 
 #### GET /track?source&spotifyId

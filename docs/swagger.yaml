@@ -13,6 +13,8 @@ definitions:
         items:
           $ref: '#/definitions/occipital.Track'
         type: array
+      updated:
+        type: string
     type: object
   occipital.Track:
     properties:
@@ -30,7 +32,7 @@ definitions:
         type: string
       instruments:
         items:
-          $ref: '#/definitions/occipital.TrackArtistInstruments'
+          $ref: '#/definitions/occipital.TrackInstrumentArtists'
         type: array
       isrc:
         type: string
@@ -38,12 +40,16 @@ definitions:
         $ref: '#/definitions/occipital.TrackMeta'
       name:
         type: string
-      producers:
+      production_credits:
         items:
-          type: string
+          $ref: '#/definitions/occipital.TrackProductionCredit'
         type: array
       release_date:
         type: string
+      song_credits:
+        items:
+          $ref: '#/definitions/occipital.TrackSongCredit'
+        type: array
       source:
         type: string
       source_id:
@@ -120,15 +126,6 @@ definitions:
           type: number
         type: array
     type: object
-  occipital.TrackArtistInstruments:
-    properties:
-      artist:
-        type: string
-      instruments:
-        items:
-          type: string
-        type: array
-    type: object
   occipital.TrackFeatures:
     properties:
       acousticness:
@@ -187,6 +184,15 @@ definitions:
           Example: 0.0556
         type: number
     type: object
+  occipital.TrackInstrumentArtists:
+    properties:
+      artists:
+        items:
+          type: string
+        type: array
+      instrument:
+        type: string
+    type: object
   occipital.TrackMeta:
     properties:
       duration_ms:
@@ -218,6 +224,24 @@ definitions:
           Range: 3 - 7
           Example: 4
         type: integer
+    type: object
+  occipital.TrackProductionCredit:
+    properties:
+      artists:
+        items:
+          type: string
+        type: array
+      credit:
+        type: string
+    type: object
+  occipital.TrackSongCredit:
+    properties:
+      artists:
+        items:
+          type: string
+        type: array
+      credit:
+        type: string
     type: object
   profile.ProfileResponse:
     properties:

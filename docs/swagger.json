@@ -237,6 +237,9 @@
                     "items": {
                         "$ref": "#/definitions/occipital.Track"
                     }
+                },
+                "updated": {
+                    "type": "string"
                 }
             }
         },
@@ -264,7 +267,7 @@
                 "instruments": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/occipital.TrackArtistInstruments"
+                        "$ref": "#/definitions/occipital.TrackInstrumentArtists"
                     }
                 },
                 "isrc": {
@@ -276,14 +279,20 @@
                 "name": {
                     "type": "string"
                 },
-                "producers": {
+                "production_credits": {
                     "type": "array",
                     "items": {
-                        "type": "string"
+                        "$ref": "#/definitions/occipital.TrackProductionCredit"
                     }
                 },
                 "release_date": {
                     "type": "string"
+                },
+                "song_credits": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/occipital.TrackSongCredit"
+                    }
                 },
                 "source": {
                     "type": "string"
@@ -350,20 +359,6 @@
                 }
             }
         },
-        "occipital.TrackArtistInstruments": {
-            "type": "object",
-            "properties": {
-                "artist": {
-                    "type": "string"
-                },
-                "instruments": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
         "occipital.TrackFeatures": {
             "type": "object",
             "properties": {
@@ -401,6 +396,20 @@
                 }
             }
         },
+        "occipital.TrackInstrumentArtists": {
+            "type": "object",
+            "properties": {
+                "artists": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "instrument": {
+                    "type": "string"
+                }
+            }
+        },
         "occipital.TrackMeta": {
             "type": "object",
             "properties": {
@@ -423,6 +432,34 @@
                 "time_signature": {
                     "description": "TimeSignature is an estimated time signature. The time signature (meter) is a notational convention to specify how many beats are in each bar (or measure).\nThe time signature ranges from 3 to 7 indicating time signatures of \"3/4\", to \"7/4\".\nRange: 3 - 7\nExample: 4",
                     "type": "integer"
+                }
+            }
+        },
+        "occipital.TrackProductionCredit": {
+            "type": "object",
+            "properties": {
+                "artists": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "credit": {
+                    "type": "string"
+                }
+            }
+        },
+        "occipital.TrackSongCredit": {
+            "type": "object",
+            "properties": {
+                "artists": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "credit": {
+                    "type": "string"
                 }
             }
         },
