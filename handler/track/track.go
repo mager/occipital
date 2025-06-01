@@ -77,6 +77,7 @@ func NewGetTrackHandler(
 type GetTrackRequest struct {
 	SourceID string `json:"source_id"`
 	Source   string `json:"source"`
+	ISRC     string `json:"isrc"`
 }
 
 type GetTrackResponse struct {
@@ -97,11 +98,79 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	q := r.URL.Query()
 	sourceId := q.Get("sourceId")
+	isrc := q.Get("isrc")
 
 	l := h.log
 
 	var resp GetTrackResponse
 	var err error
+
+	// V2 Version based on ISRC, start wtih Musicbrainz, then Spotify
+	if isrc != "" {
+		track := occipital.Track{
+			ISRC: isrc,
+		}
+		searchRecsReq := mb.SearchRecordingsByISRCRequest{
+			ISRC: isrc,
+		}
+		recs, err := h.musicbrainzClient.Client.SearchRecordingsByISRC(searchRecsReq)
+		if err != nil {
+			l.Errorf("error fetching recordings: %v", err)
+		}
+
+		var recording mb.GetRecordingResponse
+		if recs.Count >= 1 {
+			getRecReq := mb.GetRecordingRequest{
+				ID:       recs.Recordings[0].ID,
+				Includes: []mb.Include{"artist-credits", "genres", "work-rels"},
+			}
+			recording, err = h.musicbrainzClient.Client.GetRecording(getRecReq)
+			if err != nil {
+				l.Errorf("error fetching recording: %v", err)
+
+				// Attempt to fetch the second recording if available
+				if len(recs.Recordings) > 1 {
+					getRecReq.ID = recs.Recordings[1].ID
+					recording, err = h.musicbrainzClient.Client.GetRecording(getRecReq)
+					if err != nil {
+						l.Errorf("error fetching second recording: %v", err)
+					}
+				}
+			}
+
+			if len(*recording.Relations) == 0 && len(recs.Recordings) > 1 {
+				getRecReq.ID = recs.Recordings[1].ID
+				recording, err = h.musicbrainzClient.Client.GetRecording(getRecReq)
+				if err != nil {
+					l.Errorf("error fetching second recording: %v", err)
+				}
+			}
+
+			l.Infow("Recording", "recording", recording)
+
+			track.Name = recording.Recording.Title
+			// track.Artist = util.GetFirstArtist(recording.Recording.Artists)
+			// track.Image = *util.GetThumb(recording.Recording.Album)
+			// track.ReleaseDate = *util.GetReleaseDate(recording.Recording.Album)
+			track.Instruments = getArtistInstrumentsForRecording(recording.Recording)
+			track.ProductionCredits = getProductionCreditsForRecording(recording.Recording)
+			track.Genres = getGenresForRecording(recording.Recording)
+
+			// If a work exists, get the song credits
+			work := h.getWorkFromRecording(recording.Recording)
+			if work != nil {
+				track.SongCredits = getSongCreditsForWork(*work)
+			}
+		}
+
+		resp.Track = track
+
+		json.NewEncoder(w).Encode(resp)
+
+		return
+	}
+
+	// V1 Version
 
 	// Channels for receiving results
 	var wg sync.WaitGroup
