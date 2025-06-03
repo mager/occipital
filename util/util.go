@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strings"
 
+	mb "github.com/mager/musicbrainz-go/musicbrainz"
 	spot "github.com/zmb3/spotify/v2"
 	"golang.org/x/exp/maps"
 )
@@ -67,4 +68,38 @@ func GetISRC(track *spot.FullTrack) *string {
 	}
 
 	return nil
+}
+
+// GetArtistCredits returns a formatted string of artist credits from a MusicBrainz recording
+func GetArtistCredits(artistCredits []mb.ArtistCredit) string {
+	if len(artistCredits) == 0 {
+		return "Various Artists"
+	}
+
+	// Build the artist string by joining names with their join phrases
+	var result strings.Builder
+	for i, credit := range artistCredits {
+		result.WriteString(credit.Name)
+		if i < len(artistCredits)-1 && credit.JoinPhrase != "" {
+			result.WriteString(credit.JoinPhrase)
+		}
+	}
+
+	return result.String()
+}
+
+// GetArtistCreditsFromRecording returns a formatted string of artist credits from a MusicBrainz recording
+func GetArtistCreditsFromRecording(artistCredits []mb.ArtistCredit) string {
+	if len(artistCredits) == 0 {
+		return "Various Artists"
+	}
+
+	var result strings.Builder
+	for i, credit := range artistCredits {
+		result.WriteString(credit.Name)
+		if i < len(artistCredits)-1 {
+			result.WriteString(", ")
+		}
+	}
+	return result.String()
 }

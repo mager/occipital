@@ -149,7 +149,11 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			l.Infow("Recording", "recording", recording)
 
 			track.Name = recording.Recording.Title
-			// track.Artist = util.GetFirstArtist(recording.Recording.Artists)
+			if recording.Recording.ArtistCredits != nil {
+				track.Artist = util.GetArtistCreditsFromRecording(*recording.Recording.ArtistCredits)
+			} else {
+				track.Artist = "Various Artists"
+			}
 			// track.Image = *util.GetThumb(recording.Recording.Album)
 			// track.ReleaseDate = *util.GetReleaseDate(recording.Recording.Album)
 			track.Instruments = getArtistInstrumentsForRecording(recording.Recording)
