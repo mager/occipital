@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"sort"
 	"sync"
+	"time"
 
 	spot "github.com/zmb3/spotify/v2"
 
@@ -122,7 +123,7 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if recs.Count >= 1 {
 			getRecReq := mb.GetRecordingRequest{
 				ID:       recs.Recordings[0].ID,
-				Includes: []mb.Include{"artist-credits", "genres", "work-rels"},
+				Includes: []mb.Include{"artist-credits", "genres", "work-rels", "releases"},
 			}
 			recording, err = h.musicbrainzClient.Client.GetRecording(getRecReq)
 			if err != nil {
@@ -154,7 +155,8 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			} else {
 				track.Artist = "Various Artists"
 			}
-			// track.Image = *util.GetThumb(recording.Recording.Album)
+			track.Image = getLatestReleaseMBID(recording.Recording)
+
 			// track.ReleaseDate = *util.GetReleaseDate(recording.Recording.Album)
 			track.Instruments = getArtistInstrumentsForRecording(recording.Recording)
 			track.ProductionCredits = getProductionCreditsForRecording(recording.Recording)
@@ -461,4 +463,43 @@ func mapInitialTrack(r *http.Request, ft *spot.FullTrack) occipital.Track {
 	track.ReleaseDate = *util.GetReleaseDate(ft.Album)
 	track.ISRC = *util.GetISRC(ft)
 	return track
+}
+
+// getLatestReleaseMBID returns the MBID of the latest release (by date) in a recording.
+func getLatestReleaseMBID(recording mb.Recording) string {
+	if recording.Releases == nil || len(*recording.Releases) == 0 {
+		return ""
+	}
+
+	var latestRelease *mb.Release
+	var latestTime time.Time
+
+	for _, release := range *recording.Releases {
+		if release.Date == "" {
+			continue
+		}
+
+		parsedTime, err := time.Parse("2006-01-02", release.Date)
+		if err != nil {
+			// Try parsing shorter formats (YYYY-MM)
+			parsedTime, err = time.Parse("2006-01", release.Date)
+			if err != nil {
+				// Try just year
+				parsedTime, err = time.Parse("2006", release.Date)
+				if err != nil {
+					continue
+				}
+			}
+		}
+
+		if latestRelease == nil || parsedTime.After(latestTime) {
+			latestRelease = &release
+			latestTime = parsedTime
+		}
+	}
+
+	if latestRelease != nil {
+		return latestRelease.ID
+	}
+	return ""
 }
