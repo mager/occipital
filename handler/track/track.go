@@ -100,11 +100,44 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	sourceId := q.Get("sourceId")
 	isrc := q.Get("isrc")
+	mbid := q.Get("mbid")
 
 	l := h.log
 
 	var resp GetTrackResponse
 	var err error
+
+	// V3 Version based on MBID, MusicBrainz recording ID
+	if mbid != "" {
+		recording, err := h.musicbrainzClient.Client.GetRecording(mb.GetRecordingRequest{
+			ID:       mbid,
+			Includes: []mb.Include{"artist-credits", "genres", "work-rels", "releases", "url-rels"},
+		})
+		if err != nil {
+			l.Errorf("error fetching recording: %v", err)
+		}
+
+		track := occipital.Track{
+			ID:                mbid,
+			Artist:            util.GetArtistCreditsFromRecording(*recording.Recording.ArtistCredits),
+			Name:              recording.Recording.Title,
+			Image:             getLatestReleaseMBID(recording.Recording),
+			ReleaseDate:       recording.Recording.FirstReleaseDate,
+			ISRC:              isrc,
+			Instruments:       getArtistInstrumentsForRecording(recording.Recording),
+			ProductionCredits: getProductionCreditsForRecording(recording.Recording),
+			Genres:            getGenresForRecording(recording.Recording),
+		}
+
+		work := h.getWorkFromRecording(recording.Recording)
+		if work != nil {
+			track.SongCredits = getSongCreditsForWork(*work)
+		}
+
+		resp.Track = track
+		json.NewEncoder(w).Encode(resp)
+		return
+	}
 
 	// V2 Version based on ISRC, start wtih Musicbrainz, then Spotify
 	if isrc != "" {
@@ -202,12 +235,12 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	close(errChan)
 	for e := range errChan {
 		// Log the error but continue processing
-		h.log.Warn("API call failed", zap.Error(e))
+		l.Warn("API call failed", zap.Error(e))
 	}
 
 	// Add null checks before using the results
 	if fullTrack == nil {
-		h.log.Warn("Failed to fetch track data")
+		l.Warn("Failed to fetch track data")
 		http.Error(w, "Track not found", http.StatusNotFound)
 		return
 	}
@@ -465,41 +498,45 @@ func mapInitialTrack(r *http.Request, ft *spot.FullTrack) occipital.Track {
 	return track
 }
 
-// getLatestReleaseMBID returns the MBID of the latest release (by date) in a recording.
 func getLatestReleaseMBID(recording mb.Recording) string {
+	// Return early if there are no releases to check.
 	if recording.Releases == nil || len(*recording.Releases) == 0 {
 		return ""
 	}
 
-	var latestRelease *mb.Release
+	var latestReleaseID string
 	var latestTime time.Time
 
+	// Iterate through each release associated with the recording.
 	for _, release := range *recording.Releases {
-		if release.Date == "" {
+		// A release must have an ID to be useful for cover art, and a date to be considered for "latest".
+		if release.ID == "" || release.Date == "" {
 			continue
 		}
 
-		parsedTime, err := time.Parse("2006-01-02", release.Date)
-		if err != nil {
-			// Try parsing shorter formats (YYYY-MM)
-			parsedTime, err = time.Parse("2006-01", release.Date)
-			if err != nil {
-				// Try just year
-				parsedTime, err = time.Parse("2006", release.Date)
-				if err != nil {
-					continue
-				}
+		// Try parsing the date in different formats
+		var parsedTime time.Time
+		var err error
+		dateFormats := []string{"2006-01-02", "2006-01", "2006"}
+
+		for _, format := range dateFormats {
+			parsedTime, err = time.Parse(format, release.Date)
+			if err == nil {
+				break
 			}
 		}
 
-		if latestRelease == nil || parsedTime.After(latestTime) {
-			latestRelease = &release
+		if err != nil {
+			// Skip releases with invalid dates
+			continue
+		}
+
+		// If this is the first valid release found, or it's newer than the current latest, update.
+		if latestReleaseID == "" || parsedTime.After(latestTime) {
+			latestReleaseID = release.ID
 			latestTime = parsedTime
 		}
 	}
 
-	if latestRelease != nil {
-		return latestRelease.ID
-	}
-	return ""
+	return latestReleaseID
 }

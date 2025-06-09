@@ -1,6 +1,8 @@
 package occipital
 
 type Track struct {
+	// ID is based on the MusicBrainz recording ID
+	ID       string `json:"id"`
 	Artist   string `json:"artist"`
 	Name     string `json:"name"`
 	SourceID string `json:"source_id"`
