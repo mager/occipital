@@ -504,13 +504,14 @@ func getLatestReleaseMBID(recording mb.Recording) string {
 		return ""
 	}
 
-	var latestReleaseID string
-	var latestTime time.Time
+	var bestReleaseID string
+	var bestTime time.Time
+	var hasFoundReleaseWithImage bool
 
 	// Iterate through each release associated with the recording.
 	for _, release := range *recording.Releases {
-		// A release must have an ID to be useful for cover art, and a date to be considered for "latest".
-		if release.ID == "" || release.Date == "" {
+		// A release must have an ID to be useful for cover art
+		if release.ID == "" {
 			continue
 		}
 
@@ -531,12 +532,24 @@ func getLatestReleaseMBID(recording mb.Recording) string {
 			continue
 		}
 
-		// If this is the first valid release found, or it's newer than the current latest, update.
-		if latestReleaseID == "" || parsedTime.After(latestTime) {
-			latestReleaseID = release.ID
-			latestTime = parsedTime
+		// Check if this release has an image by making a HEAD request to Cover Art Archive
+		imageURL := fmt.Sprintf("https://coverartarchive.org/release/%s/front-500.jpg", release.ID)
+		resp, err := http.Head(imageURL)
+		hasImage := err == nil && resp.StatusCode == http.StatusOK
+		if resp != nil {
+			resp.Body.Close()
+		}
+
+		// If we haven't found a release with an image yet, or this one has an image
+		if !hasFoundReleaseWithImage || hasImage {
+			// If this is the first valid release found, or it's newer than the current best
+			if bestReleaseID == "" || parsedTime.After(bestTime) {
+				bestReleaseID = release.ID
+				bestTime = parsedTime
+				hasFoundReleaseWithImage = hasImage
+			}
 		}
 	}
 
-	return latestReleaseID
+	return bestReleaseID
 }

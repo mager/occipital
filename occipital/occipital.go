@@ -5,8 +5,8 @@ type Track struct {
 	ID       string `json:"id"`
 	Artist   string `json:"artist"`
 	Name     string `json:"name"`
-	SourceID string `json:"source_id"`
-	Source   string `json:"source"`
+	SourceID string `json:"source_id,omitempty"`
+	Source   string `json:"source,omitempty"`
 	Image    string `json:"image"`
 
 	Meta     *TrackMeta     `json:"meta"`
