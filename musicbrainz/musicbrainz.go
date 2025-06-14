@@ -10,7 +10,9 @@ type MusicbrainzClient struct {
 
 func ProvideMusicbrainz() *MusicbrainzClient {
 	var c MusicbrainzClient
-	c.Client = musicbrainz.NewMusicbrainzClient()
+	c.Client = musicbrainz.NewMusicbrainzClient().
+		WithUserAgent("beatbrain/occipital", "1.0.0", "https://github.com/mager/occipital")
+
 	return &c
 }
 

@@ -17,6 +17,8 @@ type Track struct {
 	Title     string `json:"title" firestore:"title"`
 	SpotifyID string `json:"spotifyID" firestore:"spotifyID"`
 	Thumb     string `json:"thumb" firestore:"thumb"`
+	MBID      string `json:"mbid" firestore:"mbid"`
+	ISRC      string `json:"isrc" firestore:"isrc"`
 }
 
 // ProvideDB provides a firestore client

@@ -13,9 +13,9 @@ import (
 	"github.com/mager/occipital/spotify"
 	"go.uber.org/zap"
 	"golang.org/x/exp/rand"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
+
+const maxDaysToLookBack = 5
 
 // DiscoverHandler is an http.Handler
 type DiscoverHandler struct {
@@ -66,9 +66,10 @@ func convertToOccipitalTrack(fsTrack fsClient.Track, thumbType string) occipital
 	return occipital.Track{
 		Artist:   fsTrack.Artist,
 		Name:     fsTrack.Title,
-		Source:   "SPOTIFY",
 		SourceID: fsTrack.SpotifyID,
 		Image:    image,
+		ID:       fsTrack.MBID,
+		ISRC:     fsTrack.ISRC,
 	}
 }
 
@@ -199,22 +200,30 @@ func (h *DiscoverHandler) fetchTracksFromSource(ctx context.Context, today, yest
 func (h *DiscoverHandler) fetchTracksFromCollection(ctx context.Context, today, yesterday, collectionName string) ([]fsClient.Track, string, error) {
 	col := h.fs.Collection(collectionName)
 
+	// Try today first
 	doc, err := col.Doc(today).Get(ctx)
-	if err != nil {
-		if status.Code(err) == codes.NotFound {
-			h.log.Warn("Today's document not found, attempting yesterday", zap.String("collection", collectionName), zap.String("date", yesterday))
-			doc, err = col.Doc(yesterday).Get(ctx)
-			if err != nil {
-				h.log.Error("Failed to fetch yesterday's document", zap.String("collection", collectionName), zap.Error(err))
-				return nil, "", fmt.Errorf("error fetching document snapshot from collection '%s': %w", collectionName, err)
-			}
-			return h.extractTracks(doc, yesterday)
-		}
-		h.log.Error("Error fetching today's document", zap.String("collection", collectionName), zap.Error(err))
-		return nil, "", fmt.Errorf("error fetching document snapshot from collection '%s': %w", collectionName, err)
+	if err == nil {
+		return h.extractTracks(doc, today)
 	}
 
-	return h.extractTracks(doc, today)
+	// If today fails, try previous days up to maxDaysToLookBack
+	for i := 1; i <= maxDaysToLookBack; i++ {
+		date := time.Now().AddDate(0, 0, -i).Format("2006-01-02")
+		doc, err = col.Doc(date).Get(ctx)
+		if err == nil {
+			h.log.Infow("Found tracks from previous day",
+				"collection", collectionName,
+				"date", date,
+				"daysBack", i)
+			return h.extractTracks(doc, date)
+		}
+	}
+
+	// If we get here, we couldn't find any documents
+	h.log.Error("Failed to fetch document from any recent date",
+		"collection", collectionName,
+		"maxDaysBack", maxDaysToLookBack)
+	return nil, "", fmt.Errorf("error fetching document snapshot from collection '%s': no data found in last %d days", collectionName, maxDaysToLookBack)
 }
 
 func (h *DiscoverHandler) extractTracks(doc *firestore.DocumentSnapshot, date string) ([]fsClient.Track, string, error) {
