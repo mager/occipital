@@ -63,6 +63,7 @@ func main() {
 			AsRoute(spotHandler.NewRecommendedTracksHandler),
 			AsRoute(trackHandler.NewGetTrackHandler),
 			AsRoute(discoverHandler.NewDiscoverHandler),
+			AsRoute(discoverHandler.NewDiscoverV2Handler),
 		),
 		fx.Invoke(func(*http.Server) {}),
 	).Run()
@@ -114,8 +115,11 @@ func NewHTTPServer(
 	spotifyGetTrackHandler := trackHandler.NewGetTrackHandler(logger, spotifyClient, musicbrainzClient)
 	router.Handle(spotifyGetTrackHandler.Pattern(), spotifyGetTrackHandler)
 
-	discoverHandler := discoverHandler.NewDiscoverHandler(logger, fs, spotifyClient)
-	router.Handle(discoverHandler.Pattern(), discoverHandler)
+	discoverV1Handler := discoverHandler.NewDiscoverHandler(logger, fs, spotifyClient)
+	router.Handle(discoverV1Handler.Pattern(), discoverV1Handler)
+
+	discoverV2Handler := discoverHandler.NewDiscoverV2Handler(logger, fs)
+	router.Handle(discoverV2Handler.Pattern(), discoverV2Handler)
 
 	// websocket handler
 	router.HandleFunc("/np", func(w http.ResponseWriter, r *http.Request) {

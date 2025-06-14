@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"time"
 
 	"cloud.google.com/go/firestore"
@@ -25,7 +26,11 @@ type DiscoverHandler struct {
 }
 
 func (*DiscoverHandler) Pattern() string {
-	return "/discover"
+	return "/discover/v1"
+}
+
+func (*DiscoverHandler) PatternV2() string {
+	return "/discover/v2"
 }
 
 // NewDiscoverHandler builds a new DiscoverHandler.
@@ -56,8 +61,6 @@ type sourceConfig struct {
 func convertToOccipitalTrack(fsTrack fsClient.Track, thumbType string) occipital.Track {
 	var image string
 	switch thumbType {
-	case "hypem":
-		image = getHypemThumb(fsTrack.Thumb)
 	case "hnhh":
 		image = getHnhhThumb(fsTrack.Thumb)
 	default:
@@ -70,6 +73,7 @@ func convertToOccipitalTrack(fsTrack fsClient.Track, thumbType string) occipital
 		Image:    image,
 		ID:       fsTrack.MBID,
 		ISRC:     fsTrack.ISRC,
+		Rank:     fsTrack.Rank,
 	}
 }
 
@@ -233,4 +237,91 @@ func (h *DiscoverHandler) extractTracks(doc *firestore.DocumentSnapshot, date st
 		return nil, "", fmt.Errorf("error converting document snapshot to tracks: %w", err)
 	}
 	return tracksDoc.Tracks, date, nil
+}
+
+// ServeHTTPV2 handles the v2 discover endpoint
+func (h *DiscoverHandler) ServeHTTPV2(w http.ResponseWriter, r *http.Request) {
+	ctx := context.Background()
+	w.Header().Set("Content-Type", "application/json")
+
+	var req DiscoverRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.log.Error("Error decoding request body", zap.Error(err))
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Define all sources
+	sources := []sourceConfig{
+		{"billboard", "spotify"},
+		{"hypem", "hypem"},
+		{"hnhh", "hnhh"},
+	}
+
+	var allTracks []occipital.Track
+	now := time.Now()
+	today := now.Format("2006-01-02")
+	yesterday := now.AddDate(0, 0, -1).Format("2006-01-02")
+
+	var latestDate string
+	for _, source := range sources {
+		tracks, dateUsed, err := h.fetchTracksFromSource(ctx, today, yesterday, source.name, source.thumbType)
+		if err != nil {
+			h.log.Error("Error fetching tracks from source", zap.String("source", source.name), zap.Error(err))
+			http.Error(w, "Failed to fetch tracks", http.StatusInternalServerError)
+			return
+		}
+
+		allTracks = append(allTracks, tracks...)
+
+		if dateUsed > latestDate {
+			latestDate = dateUsed
+		}
+	}
+
+	// Deduplicate tracks by artist
+	uniqueTracks := make([]occipital.Track, 0, len(allTracks))
+	artistSeen := make(map[string]bool)
+	for _, track := range allTracks {
+		if !artistSeen[track.Artist] {
+			uniqueTracks = append(uniqueTracks, track)
+			artistSeen[track.Artist] = true
+		}
+	}
+	allTracks = uniqueTracks
+
+	sort.Slice(allTracks, func(i, j int) bool {
+		return allTracks[i].Rank < allTracks[j].Rank
+	})
+
+	resp := &DiscoverResponse{
+		Tracks:  allTracks,
+		Updated: latestDate,
+	}
+
+	// Log final request details
+	h.log.Infow(
+		"Discover v2 request finished",
+		"totalTracks", len(allTracks),
+		"updatedDate", latestDate,
+	)
+
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		h.log.Error("Error encoding response", zap.Error(err))
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+	}
+}
+
+// getRankFromSource returns the rank based on the source
+func getRankFromSource(source string) int {
+	switch source {
+	case "billboard":
+		return 1
+	case "hypem":
+		return 2
+	case "hnhh":
+		return 3
+	default:
+		return 999
+	}
 }
