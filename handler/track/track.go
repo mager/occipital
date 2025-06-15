@@ -121,7 +121,7 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			ID:                mbid,
 			Artist:            util.GetArtistCreditsFromRecording(*recording.Recording.ArtistCredits),
 			Name:              recording.Recording.Title,
-			Image:             getLatestReleaseMBID(recording.Recording),
+			Image:             getLatestReleaseImageURL(recording.Recording),
 			ReleaseDate:       recording.Recording.FirstReleaseDate,
 			ISRC:              isrc,
 			Instruments:       getArtistInstrumentsForRecording(recording.Recording),
@@ -188,7 +188,7 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			} else {
 				track.Artist = "Various Artists"
 			}
-			track.Image = getLatestReleaseMBID(recording.Recording)
+			track.Image = getLatestReleaseMBIDV0(recording.Recording)
 
 			// track.ReleaseDate = *util.GetReleaseDate(recording.Recording.Album)
 			track.Instruments = getArtistInstrumentsForRecording(recording.Recording)
@@ -498,7 +498,48 @@ func mapInitialTrack(r *http.Request, ft *spot.FullTrack) occipital.Track {
 	return track
 }
 
-func getLatestReleaseMBID(recording mb.Recording) string {
+func getLatestReleaseImageURL(recording mb.Recording) string {
+	if recording.Releases == nil || len(*recording.Releases) == 0 {
+		return ""
+	}
+
+	firstRelease := (*recording.Releases)[0]
+	if firstRelease.ID == "" {
+		return ""
+	}
+
+	type Image struct {
+		Front      bool              `json:"front"`
+		Thumbnails map[string]string `json:"thumbnails"`
+	}
+	type CAAResponse struct {
+		Images []Image `json:"images"`
+	}
+
+	url := fmt.Sprintf("https://coverartarchive.org/release/%s", firstRelease.ID)
+	resp, err := http.Get(url)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	defer resp.Body.Close()
+
+	var caaResp CAAResponse
+	if err := json.NewDecoder(resp.Body).Decode(&caaResp); err != nil {
+		return ""
+	}
+
+	for _, img := range caaResp.Images {
+		if img.Front {
+			if url500, ok := img.Thumbnails["500"]; ok {
+				return url500
+			}
+		}
+	}
+
+	return ""
+}
+
+func getLatestReleaseMBIDV0(recording mb.Recording) string {
 	// Return early if there are no releases to check.
 	if recording.Releases == nil || len(*recording.Releases) == 0 {
 		return ""
