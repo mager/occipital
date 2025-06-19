@@ -14,6 +14,7 @@ type Track struct {
 	Analysis *TrackAnalysis `json:"analysis"`
 	Links    []ExternalLink `json:"links"`
 
+	Releases          *[]Release                `json:"releases"`
 	ReleaseDate       string                    `json:"release_date"`
 	Genres            []string                  `json:"genres"`
 	ISRC              string                    `json:"isrc"`
@@ -147,4 +148,10 @@ type TrackAnalysisSegment struct {
 type ExternalLink struct {
 	Type string `json:"string"`
 	URL  string `json:"url"`
+}
+
+// Release represents a release from MusicBrainz
+type Release struct {
+	ID    string `json:"id"`
+	Image string `json:"image"`
 }

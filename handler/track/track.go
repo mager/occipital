@@ -131,6 +131,7 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			ProductionCredits: getProductionCreditsForRecording(recording.Recording),
 			Genres:            getGenresForRecording(recording.Recording),
 			Links:             getExternalLinksForRecording(recording.Recording),
+			Releases:          getReleasesFromRecording(recording.Recording),
 		}
 
 		work := h.getWorkFromRecording(recording.Recording)
@@ -437,7 +438,7 @@ func getLatestReleaseMBIDV0(recording mb.Recording) string {
 		}
 
 		// Check if this release has an image by making a HEAD request to Cover Art Archive
-		imageURL := fmt.Sprintf("https://coverartarchive.org/release/%s/front-500.jpg", release.ID)
+		imageURL := getCoverArtArchiveImageURL(release.ID, "front", 500)
 		resp, err := http.Head(imageURL)
 		hasImage := err == nil && resp.StatusCode == http.StatusOK
 		if resp != nil {
@@ -471,4 +472,30 @@ func getExternalLinksForRecording(rec mb.Recording) []occipital.ExternalLink {
 		}
 	}
 	return links
+}
+
+func getReleasesFromRecording(rec mb.Recording) *[]occipital.Release {
+	if rec.Releases == nil {
+		return nil
+	}
+	releases := make([]occipital.Release, 0, len(*rec.Releases))
+	for _, mbRelease := range *rec.Releases {
+		releases = append(releases, occipital.Release{
+			ID:    mbRelease.ID,
+			Image: getCoverArtArchiveImageURL(mbRelease.ID, "front", 250),
+		})
+	}
+	return &releases
+}
+
+// getCoverArtArchiveImageURL returns the URL for a release image from Cover Art Archive.
+// style should be "front" or "back", and size should be 250, 500, or 1200.
+func getCoverArtArchiveImageURL(releaseID string, style string, size int) string {
+	if style != "front" && style != "back" {
+		style = "front"
+	}
+	if size != 250 && size != 500 && size != 1200 {
+		size = 500
+	}
+	return fmt.Sprintf("https://coverartarchive.org/release/%s/%s-%d.jpg", releaseID, style, size)
 }
