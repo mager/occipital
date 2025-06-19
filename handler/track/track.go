@@ -111,8 +111,15 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// V3 Version based on MBID, MusicBrainz recording ID
 	if mbid != "" {
 		recording, err := h.musicbrainzClient.Client.GetRecording(mb.GetRecordingRequest{
-			ID:       mbid,
-			Includes: []mb.Include{"artist-credits", "genres", "work-rels", "releases", "url-rels", "artist-rels"},
+			ID: mbid,
+			Includes: []mb.Include{
+				"artist-credits",
+				"artist-rels",
+				"genres",
+				"releases",
+				"work-rels",
+				"url-rels",
+			},
 		})
 		if err != nil {
 			l.Errorf("error fetching recording: %v", err)
@@ -374,11 +381,11 @@ func getArtistInstrumentsForRecording(rec mb.Recording) []*occipital.TrackInstru
 }
 
 func getGenresForRecording(rec mb.Recording) []string {
-	maxGenres := 3
+	maxGenres := 10
 	genres := make([]string, 0, maxGenres)
 
+	// First, try recording genres
 	if rec.Genres != nil && len(*rec.Genres) > 0 {
-		// Dereference the pointer before sorting
 		genresSlice := *rec.Genres
 
 		// Sort genres by Count in descending order
@@ -389,6 +396,35 @@ func getGenresForRecording(rec mb.Recording) []string {
 		// Add genres with the highest counts, up to the max limit
 		for i := 0; i < maxGenres && i < len(genresSlice); i++ {
 			genres = append(genres, genresSlice[i].Name)
+		}
+	}
+
+	// If no genres found on recording, fall back to artist genres
+	if len(genres) == 0 && rec.ArtistCredits != nil {
+		genreCount := make(map[string]int)
+		for _, credit := range *rec.ArtistCredits {
+			if credit.Artist != nil && credit.Artist.Genres != nil {
+				for _, g := range *credit.Artist.Genres {
+					genreCount[g.Name] += g.Count
+				}
+			}
+		}
+		// Convert map to slice and sort by count
+		var genreList []struct {
+			Name  string
+			Count int
+		}
+		for name, count := range genreCount {
+			genreList = append(genreList, struct {
+				Name  string
+				Count int
+			}{name, count})
+		}
+		sort.Slice(genreList, func(i, j int) bool {
+			return genreList[i].Count > genreList[j].Count
+		})
+		for i := 0; i < maxGenres && i < len(genreList); i++ {
+			genres = append(genres, genreList[i].Name)
 		}
 	}
 
