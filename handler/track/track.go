@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -111,7 +112,7 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if mbid != "" {
 		recording, err := h.musicbrainzClient.Client.GetRecording(mb.GetRecordingRequest{
 			ID:       mbid,
-			Includes: []mb.Include{"artist-credits", "genres", "work-rels", "releases", "url-rels"},
+			Includes: []mb.Include{"artist-credits", "genres", "work-rels", "releases", "url-rels", "artist-rels"},
 		})
 		if err != nil {
 			l.Errorf("error fetching recording: %v", err)
@@ -127,6 +128,7 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Instruments:       getArtistInstrumentsForRecording(recording.Recording),
 			ProductionCredits: getProductionCreditsForRecording(recording.Recording),
 			Genres:            getGenresForRecording(recording.Recording),
+			Links:             getExternalLinksForRecording(recording.Recording),
 		}
 
 		work := h.getWorkFromRecording(recording.Recording)
@@ -593,4 +595,19 @@ func getLatestReleaseMBIDV0(recording mb.Recording) string {
 	}
 
 	return bestReleaseID
+}
+
+func getExternalLinksForRecording(rec mb.Recording) []occipital.ExternalLink {
+	var links []occipital.ExternalLink
+	for _, rel := range *rec.Relations {
+		if rel.TargetType == "url" {
+			if strings.Contains(rel.URL.Resource, "spotify") {
+				links = append(links, occipital.ExternalLink{
+					Type: "spotify",
+					URL:  rel.URL.Resource,
+				})
+			}
+		}
+	}
+	return links
 }
