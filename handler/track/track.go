@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -439,8 +440,13 @@ func getLatestReleaseMBIDV0(recording mb.Recording) string {
 
 		// Check if this release has an image by making a HEAD request to Cover Art Archive
 		imageURL := getCoverArtArchiveImageURL(release.ID, "front", 500)
-		resp, err := http.Head(imageURL)
-		hasImage := err == nil && resp.StatusCode == http.StatusOK
+
+		// Use OPTIONS to check if the resource exists and supports GET/HEAD
+		resp, err := http.DefaultClient.Do(&http.Request{
+			Method: "OPTIONS",
+			URL:    imageURL,
+		})
+		hasImage := err == nil && resp != nil && resp.StatusCode == http.StatusOK
 		if resp != nil {
 			resp.Body.Close()
 		}
@@ -480,12 +486,16 @@ func getReleasesFromRecording(rec mb.Recording) *[]occipital.Release {
 	}
 	releases := make([]occipital.Release, 0, len(*rec.Releases))
 	for _, mbRelease := range *rec.Releases {
+		if mbRelease.Status != "Official" {
+			continue
+		}
 		releases = append(releases, occipital.Release{
 			Country:        mbRelease.Country,
 			Date:           mbRelease.Date,
 			Disambiguation: mbRelease.Disambiguation,
 			ID:             mbRelease.ID,
-			Image:          getCoverArtArchiveImageURL(mbRelease.ID, "front", 250),
+			Image:          getCoverArtArchiveImageURL(mbRelease.ID, "front", 250).String(),
+			Images:         getReleaseImagesForRelease(mbRelease.ID),
 		})
 	}
 	return &releases
@@ -493,12 +503,55 @@ func getReleasesFromRecording(rec mb.Recording) *[]occipital.Release {
 
 // getCoverArtArchiveImageURL returns the URL for a release image from Cover Art Archive.
 // style should be "front" or "back", and size should be 250, 500, or 1200.
-func getCoverArtArchiveImageURL(releaseID string, style string, size int) string {
+func getCoverArtArchiveImageURL(releaseID string, style string, size int) *url.URL {
 	if style != "front" && style != "back" {
 		style = "front"
 	}
 	if size != 250 && size != 500 && size != 1200 {
 		size = 500
 	}
-	return fmt.Sprintf("https://coverartarchive.org/release/%s/%s-%d.jpg", releaseID, style, size)
+	urlStr := fmt.Sprintf("https://coverartarchive.org/release/%s/%s-%d.jpg", releaseID, style, size)
+	parsedURL, err := url.Parse(urlStr)
+	if err != nil {
+		return nil
+	}
+	return parsedURL
+}
+
+// getReleaseImagesForRelease fetches all images for a given release from the Cover Art Archive.
+func getReleaseImagesForRelease(releaseID string) *[]occipital.ReleaseImage {
+	type Image struct {
+		ID         int64             `json:"id"`
+		Types      []string          `json:"types"`
+		Thumbnails map[string]string `json:"thumbnails"`
+	}
+	type CAAResponse struct {
+		Images []Image `json:"images"`
+	}
+
+	url := fmt.Sprintf("https://coverartarchive.org/release/%s", releaseID)
+	resp, err := http.Get(url)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		return nil
+	}
+	defer resp.Body.Close()
+
+	var caaResp CAAResponse
+	if err := json.NewDecoder(resp.Body).Decode(&caaResp); err != nil {
+		return nil
+	}
+
+	var images []occipital.ReleaseImage
+	for _, img := range caaResp.Images {
+		imgType := ""
+		if len(img.Types) > 0 {
+			imgType = img.Types[0]
+		}
+		images = append(images, occipital.ReleaseImage{
+			ID:    img.ID,
+			Type:  imgType,
+			Image: fmt.Sprintf("https://coverartarchive.org/release/%s/%d-250.jpg", releaseID, img.ID),
+		})
+	}
+	return &images
 }
