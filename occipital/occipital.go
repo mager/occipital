@@ -152,6 +152,9 @@ type ExternalLink struct {
 
 // Release represents a release from MusicBrainz
 type Release struct {
-	ID    string `json:"id"`
-	Image string `json:"image"`
+	Country        string `json:"country"`
+	Date           string `json:"date"`
+	Disambiguation string `json:"disambiguation"`
+	ID             string `json:"id"`
+	Image          string `json:"image"`
 }

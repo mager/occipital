@@ -182,10 +182,6 @@ func (h *GetTrackHandler) GetTrackV1(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		for _, relation := range *recording.Relations {
-			l.Debugw("got relation", zap.Any("relation", relation))
-		}
-
 		track.Instruments = getArtistInstrumentsForRecording(recording.Recording)
 		track.ProductionCredits = getProductionCreditsForRecording(recording.Recording)
 		track.Genres = getGenresForRecording(recording.Recording)

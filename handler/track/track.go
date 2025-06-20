@@ -122,11 +122,11 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		track := occipital.Track{
 			ID:                mbid,
-			Artist:            util.GetArtistCreditsFromRecording(*recording.Recording.ArtistCredits),
-			Name:              recording.Recording.Title,
-			Image:             getLatestReleaseImageURL(recording.Recording),
-			ReleaseDate:       recording.Recording.FirstReleaseDate,
 			ISRC:              isrc,
+			Name:              recording.Recording.Title,
+			Artist:            util.GetArtistCreditsFromRecording(*recording.Recording.ArtistCredits),
+			ReleaseDate:       recording.Recording.FirstReleaseDate,
+			Image:             getLatestReleaseImageURL(recording.Recording),
 			Instruments:       getArtistInstrumentsForRecording(recording.Recording),
 			ProductionCredits: getProductionCreditsForRecording(recording.Recording),
 			Genres:            getGenresForRecording(recording.Recording),
@@ -481,8 +481,11 @@ func getReleasesFromRecording(rec mb.Recording) *[]occipital.Release {
 	releases := make([]occipital.Release, 0, len(*rec.Releases))
 	for _, mbRelease := range *rec.Releases {
 		releases = append(releases, occipital.Release{
-			ID:    mbRelease.ID,
-			Image: getCoverArtArchiveImageURL(mbRelease.ID, "front", 250),
+			Country:        mbRelease.Country,
+			Date:           mbRelease.Date,
+			Disambiguation: mbRelease.Disambiguation,
+			ID:             mbRelease.ID,
+			Image:          getCoverArtArchiveImageURL(mbRelease.ID, "front", 250),
 		})
 	}
 	return &releases
