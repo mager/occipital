@@ -23,6 +23,7 @@ import (
 var (
 	instrumentMappings = map[string]string{
 		"electric bass guitar":     "bass",
+		"acoustic bass guitar":     "bass",
 		"bass guitar":              "bass",
 		"drums (drum set)":         "drums",
 		"percussion":               "drums",
@@ -160,7 +161,6 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func getArtistInstrumentsForRecording(rec mb.Recording) []*occipital.TrackInstrumentArtists {
-	// Create a map to group artists by instrument
 	instrumentMap := make(map[string]map[string]struct{})
 
 	// Iterate over relations and group artists by instrument
@@ -169,43 +169,58 @@ func getArtistInstrumentsForRecording(rec mb.Recording) []*occipital.TrackInstru
 			instrumentName := relation.Attributes[0]
 			artistName := relation.Artist.Name
 
-			// Check if there's a mapping for the instrument
 			if mappedInstrumentName, ok := instrumentMappings[instrumentName]; ok {
 				instrumentName = mappedInstrumentName
 			}
 
-			// Initialize the artist set for this instrument if not already initialized
 			if instrumentMap[instrumentName] == nil {
 				instrumentMap[instrumentName] = make(map[string]struct{})
 			}
 
-			// Add artist to the instrument map (avoiding duplicates)
 			instrumentMap[instrumentName][artistName] = struct{}{}
 		}
 	}
 
-	// Convert instrumentMap to a slice of TrackInstrumentArtists
 	var instrumentArtists []*occipital.TrackInstrumentArtists
 	for instrument, artistSet := range instrumentMap {
-		// Convert the set of artists to a slice
 		artists := make([]string, 0, len(artistSet))
 		for artist := range artistSet {
 			artists = append(artists, artist)
 		}
 
-		// Sort the artists alphabetically
 		sort.Strings(artists)
 
-		// Create a TrackInstrumentArtists struct
 		instrumentArtists = append(instrumentArtists, &occipital.TrackInstrumentArtists{
 			Instrument: instrument,
 			Artists:    artists,
 		})
 	}
 
-	// Sort the instruments by the number of artists (descending)
+	// Sort the instruments by instrumentRankings (lower is higher priority), then by number of artists (descending)
 	sort.Slice(instrumentArtists, func(i, j int) bool {
-		return len(instrumentArtists[i].Artists) > len(instrumentArtists[j].Artists)
+		rankI, okI := instrumentRankings[instrumentArtists[i].Instrument]
+		rankJ, okJ := instrumentRankings[instrumentArtists[j].Instrument]
+
+		// If both have a ranking, sort by ranking
+		if okI && okJ {
+			if rankI != rankJ {
+				return rankI < rankJ
+			}
+		} else if okI {
+			// Only i has a ranking, so it comes first
+			return true
+		} else if okJ {
+			// Only j has a ranking, so j comes first
+			return false
+		}
+
+		// If both have no ranking or same ranking, sort by number of artists (descending)
+		if len(instrumentArtists[i].Artists) != len(instrumentArtists[j].Artists) {
+			return len(instrumentArtists[i].Artists) > len(instrumentArtists[j].Artists)
+		}
+
+		// If still tied, sort alphabetically by instrument name
+		return instrumentArtists[i].Instrument < instrumentArtists[j].Instrument
 	})
 
 	return instrumentArtists
