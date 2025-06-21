@@ -108,7 +108,6 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// V3 Version based on MBID, MusicBrainz recording ID
 	if mbid != "" {
-		startMB := time.Now()
 		l.Infow("Fetching MusicBrainz recording", "mbid", mbid)
 		recording, err := h.musicbrainzClient.Client.GetRecording(mb.GetRecordingRequest{
 			ID: mbid,
@@ -121,7 +120,6 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"url-rels",
 			},
 		})
-		l.Infow("Fetched MusicBrainz recording", "mbid", mbid, "duration_ms", time.Since(startMB).Milliseconds())
 		if err != nil {
 			l.Errorf("error fetching recording: %v", err)
 		}
@@ -351,13 +349,10 @@ func getSongCreditsForWork(rec mb.Work) []*occipital.TrackSongCredit {
 func (h *GetTrackHandler) getWorkFromRecordingWithLog(rec mb.Recording) *mb.Work {
 	for _, relation := range *rec.Relations {
 		if relation.TargetType == "work" {
-			start := time.Now()
-			h.log.Infow("Fetching MusicBrainz work", "work_id", relation.Work.ID)
 			work, err := h.musicbrainzClient.Client.GetWork(mb.GetWorkRequest{
 				ID:       relation.Work.ID,
 				Includes: []mb.Include{"artist-rels", "url-rels"},
 			})
-			h.log.Infow("Fetched MusicBrainz work", "work_id", relation.Work.ID, "duration_ms", time.Since(start).Milliseconds())
 			if err != nil {
 				h.log.Errorf("error fetching work: %v", err)
 				return nil
@@ -393,10 +388,7 @@ func getLatestReleaseImageURLWithLog(l *zap.SugaredLogger, recording mb.Recordin
 		return ""
 	}
 	url := fmt.Sprintf("https://coverartarchive.org/release/%s", firstRelease.ID)
-	start := time.Now()
-	l.Infow("Fetching Cover Art Archive images", "release_id", firstRelease.ID, "url", url)
 	resp, err := http.Get(url)
-	l.Infow("Fetched Cover Art Archive images", "release_id", firstRelease.ID, "url", url, "duration_ms", time.Since(start).Milliseconds())
 	if err != nil || resp.StatusCode != http.StatusOK {
 		return ""
 	}
@@ -491,6 +483,12 @@ func getExternalLinksForRecording(rec mb.Recording) []occipital.ExternalLink {
 					URL:  rel.URL.Resource,
 				})
 			}
+			if strings.Contains(rel.URL.Resource, "genius") {
+				links = append(links, occipital.ExternalLink{
+					Type: "genius",
+					URL:  rel.URL.Resource,
+				})
+			}
 		}
 	}
 	return links
@@ -532,16 +530,17 @@ func getReleasesFromRecordingWithLog(l *zap.SugaredLogger, rec mb.Recording) *[]
 			continue
 		}
 		wg.Add(1)
-		sem <- struct{}{}          // acquire semaphore
-		mbReleaseCopy := mbRelease // avoid closure capture issue
+		sem <- struct{}{}
+		mbReleaseCopy := mbRelease
 		go func() {
 			defer wg.Done()
-			defer func() { <-sem }() // release semaphore
+			defer func() { <-sem }()
 			release := occipital.Release{
-				Country:        mbReleaseCopy.Country,
-				Date:           mbReleaseCopy.Date,
-				Disambiguation: mbReleaseCopy.Disambiguation,
 				ID:             mbReleaseCopy.ID,
+				Date:           mbReleaseCopy.Date,
+				Country:        mbReleaseCopy.Country,
+				Title:          mbRelease.Title,
+				Disambiguation: mbReleaseCopy.Disambiguation,
 				Image:          getCoverArtArchiveImageURL(mbReleaseCopy.ID, "front", 250).String(),
 				Images:         getReleaseImagesForReleaseWithLog(l, mbReleaseCopy.ID),
 			}
@@ -574,10 +573,7 @@ func getCoverArtArchiveImageURL(releaseID string, style string, size int) *url.U
 // getReleaseImagesForReleaseWithLog fetches all images for a given release from the Cover Art Archive.
 func getReleaseImagesForReleaseWithLog(l *zap.SugaredLogger, releaseID string) *[]occipital.ReleaseImage {
 	url := fmt.Sprintf("https://coverartarchive.org/release/%s", releaseID)
-	start := time.Now()
-	l.Infow("Fetching Cover Art Archive images (all)", "release_id", releaseID, "url", url)
 	resp, err := http.Get(url)
-	l.Infow("Fetched Cover Art Archive images (all)", "release_id", releaseID, "url", url, "duration_ms", time.Since(start).Milliseconds())
 	if err != nil || resp.StatusCode != http.StatusOK {
 		return nil
 	}
