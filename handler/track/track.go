@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	spot "github.com/zmb3/spotify/v2"
@@ -106,6 +107,8 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// V3 Version based on MBID, MusicBrainz recording ID
 	if mbid != "" {
+		startMB := time.Now()
+		l.Infow("Fetching MusicBrainz recording", "mbid", mbid)
 		recording, err := h.musicbrainzClient.Client.GetRecording(mb.GetRecordingRequest{
 			ID: mbid,
 			Includes: []mb.Include{
@@ -117,6 +120,7 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"url-rels",
 			},
 		})
+		l.Infow("Fetched MusicBrainz recording", "mbid", mbid, "duration_ms", time.Since(startMB).Milliseconds())
 		if err != nil {
 			l.Errorf("error fetching recording: %v", err)
 		}
@@ -127,15 +131,15 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Name:              recording.Recording.Title,
 			Artist:            util.GetArtistCreditsFromRecording(*recording.Recording.ArtistCredits),
 			ReleaseDate:       recording.Recording.FirstReleaseDate,
-			Image:             getLatestReleaseImageURL(recording.Recording),
+			Image:             getLatestReleaseImageURLWithLog(h.log, recording.Recording),
 			Instruments:       getArtistInstrumentsForRecording(recording.Recording),
 			ProductionCredits: getProductionCreditsForRecording(recording.Recording),
 			Genres:            getGenresForRecording(recording.Recording),
 			Links:             getExternalLinksForRecording(recording.Recording),
-			Releases:          getReleasesFromRecording(recording.Recording),
+			Releases:          getReleasesFromRecordingWithLog(h.log, recording.Recording),
 		}
 
-		work := h.getWorkFromRecording(recording.Recording)
+		work := h.getWorkFromRecordingWithLog(recording.Recording)
 		if work != nil {
 			track.SongCredits = getSongCreditsForWork(*work)
 		}
@@ -329,13 +333,16 @@ func getSongCreditsForWork(rec mb.Work) []*occipital.TrackSongCredit {
 	return songCredits
 }
 
-func (h *GetTrackHandler) getWorkFromRecording(rec mb.Recording) *mb.Work {
+func (h *GetTrackHandler) getWorkFromRecordingWithLog(rec mb.Recording) *mb.Work {
 	for _, relation := range *rec.Relations {
 		if relation.TargetType == "work" {
+			start := time.Now()
+			h.log.Infow("Fetching MusicBrainz work", "work_id", relation.Work.ID)
 			work, err := h.musicbrainzClient.Client.GetWork(mb.GetWorkRequest{
 				ID:       relation.Work.ID,
 				Includes: []mb.Include{"artist-rels", "url-rels"},
 			})
+			h.log.Infow("Fetched MusicBrainz work", "work_id", relation.Work.ID, "duration_ms", time.Since(start).Milliseconds())
 			if err != nil {
 				h.log.Errorf("error fetching work: %v", err)
 				return nil
@@ -343,7 +350,6 @@ func (h *GetTrackHandler) getWorkFromRecording(rec mb.Recording) *mb.Work {
 			return &work.Work
 		}
 	}
-
 	return nil
 }
 
@@ -363,36 +369,32 @@ func mapInitialTrack(r *http.Request, ft *spot.FullTrack) occipital.Track {
 	return track
 }
 
-func getLatestReleaseImageURL(recording mb.Recording) string {
+func getLatestReleaseImageURLWithLog(l *zap.SugaredLogger, recording mb.Recording) string {
 	if recording.Releases == nil || len(*recording.Releases) == 0 {
 		return ""
 	}
-
 	firstRelease := (*recording.Releases)[0]
 	if firstRelease.ID == "" {
 		return ""
 	}
-
-	type Image struct {
-		Front      bool              `json:"front"`
-		Thumbnails map[string]string `json:"thumbnails"`
-	}
-	type CAAResponse struct {
-		Images []Image `json:"images"`
-	}
-
 	url := fmt.Sprintf("https://coverartarchive.org/release/%s", firstRelease.ID)
+	start := time.Now()
+	l.Infow("Fetching Cover Art Archive images", "release_id", firstRelease.ID, "url", url)
 	resp, err := http.Get(url)
+	l.Infow("Fetched Cover Art Archive images", "release_id", firstRelease.ID, "url", url, "duration_ms", time.Since(start).Milliseconds())
 	if err != nil || resp.StatusCode != http.StatusOK {
 		return ""
 	}
 	defer resp.Body.Close()
-
-	var caaResp CAAResponse
+	var caaResp struct {
+		Images []struct {
+			Front      bool              `json:"front"`
+			Thumbnails map[string]string `json:"thumbnails"`
+		} `json:"images"`
+	}
 	if err := json.NewDecoder(resp.Body).Decode(&caaResp); err != nil {
 		return ""
 	}
-
 	for _, img := range caaResp.Images {
 		if img.Front {
 			if url500, ok := img.Thumbnails["500"]; ok {
@@ -400,7 +402,6 @@ func getLatestReleaseImageURL(recording mb.Recording) string {
 			}
 		}
 	}
-
 	return ""
 }
 
@@ -480,24 +481,61 @@ func getExternalLinksForRecording(rec mb.Recording) []occipital.ExternalLink {
 	return links
 }
 
-func getReleasesFromRecording(rec mb.Recording) *[]occipital.Release {
-	if rec.Releases == nil {
+func getReleasesFromRecordingWithLog(l *zap.SugaredLogger, rec mb.Recording) *[]occipital.Release {
+	if rec.Releases == nil || rec.ArtistCredits == nil || len(*rec.ArtistCredits) == 0 {
 		return nil
 	}
+	// Build a set of all artist IDs from the recording's artist-credits
+	artistIDs := make(map[string]struct{})
+	for _, ac := range *rec.ArtistCredits {
+		if ac.Artist != nil {
+			artistIDs[ac.Artist.ID] = struct{}{}
+		}
+	}
+	var releasesMu sync.Mutex
 	releases := make([]occipital.Release, 0, len(*rec.Releases))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 5) // limit to 5 concurrent requests
+
 	for _, mbRelease := range *rec.Releases {
 		if mbRelease.Status != "Official" {
 			continue
 		}
-		releases = append(releases, occipital.Release{
-			Country:        mbRelease.Country,
-			Date:           mbRelease.Date,
-			Disambiguation: mbRelease.Disambiguation,
-			ID:             mbRelease.ID,
-			Image:          getCoverArtArchiveImageURL(mbRelease.ID, "front", 250).String(),
-			Images:         getReleaseImagesForRelease(mbRelease.ID),
-		})
+		// For each release, check if any of its artist-credits matches any in the set
+		hasMatchingArtist := false
+		if mbRelease.ArtistCredit != nil {
+			for _, ac := range *mbRelease.ArtistCredit {
+				if ac.Artist != nil {
+					if _, ok := artistIDs[ac.Artist.ID]; ok {
+						hasMatchingArtist = true
+						break
+					}
+				}
+			}
+		}
+		if !hasMatchingArtist {
+			continue
+		}
+		wg.Add(1)
+		sem <- struct{}{}          // acquire semaphore
+		mbReleaseCopy := mbRelease // avoid closure capture issue
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }() // release semaphore
+			release := occipital.Release{
+				Country:        mbReleaseCopy.Country,
+				Date:           mbReleaseCopy.Date,
+				Disambiguation: mbReleaseCopy.Disambiguation,
+				ID:             mbReleaseCopy.ID,
+				Image:          getCoverArtArchiveImageURL(mbReleaseCopy.ID, "front", 250).String(),
+				Images:         getReleaseImagesForReleaseWithLog(l, mbReleaseCopy.ID),
+			}
+			releasesMu.Lock()
+			releases = append(releases, release)
+			releasesMu.Unlock()
+		}()
 	}
+	wg.Wait()
 	return &releases
 }
 
@@ -518,29 +556,27 @@ func getCoverArtArchiveImageURL(releaseID string, style string, size int) *url.U
 	return parsedURL
 }
 
-// getReleaseImagesForRelease fetches all images for a given release from the Cover Art Archive.
-func getReleaseImagesForRelease(releaseID string) *[]occipital.ReleaseImage {
-	type Image struct {
-		ID         int64             `json:"id"`
-		Types      []string          `json:"types"`
-		Thumbnails map[string]string `json:"thumbnails"`
-	}
-	type CAAResponse struct {
-		Images []Image `json:"images"`
-	}
-
+// getReleaseImagesForReleaseWithLog fetches all images for a given release from the Cover Art Archive.
+func getReleaseImagesForReleaseWithLog(l *zap.SugaredLogger, releaseID string) *[]occipital.ReleaseImage {
 	url := fmt.Sprintf("https://coverartarchive.org/release/%s", releaseID)
+	start := time.Now()
+	l.Infow("Fetching Cover Art Archive images (all)", "release_id", releaseID, "url", url)
 	resp, err := http.Get(url)
+	l.Infow("Fetched Cover Art Archive images (all)", "release_id", releaseID, "url", url, "duration_ms", time.Since(start).Milliseconds())
 	if err != nil || resp.StatusCode != http.StatusOK {
 		return nil
 	}
 	defer resp.Body.Close()
-
-	var caaResp CAAResponse
+	var caaResp struct {
+		Images []struct {
+			ID         int64             `json:"id"`
+			Types      []string          `json:"types"`
+			Thumbnails map[string]string `json:"thumbnails"`
+		} `json:"images"`
+	}
 	if err := json.NewDecoder(resp.Body).Decode(&caaResp); err != nil {
 		return nil
 	}
-
 	var images []occipital.ReleaseImage
 	for _, img := range caaResp.Images {
 		imgType := ""

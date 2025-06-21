@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 
 	mb "github.com/mager/musicbrainz-go/musicbrainz"
 	"github.com/mager/occipital/occipital"
@@ -36,14 +37,20 @@ func (h *GetTrackHandler) GetTrackV2(w http.ResponseWriter, isrc string) {
 				ID:       recs.Recordings[0].ID,
 				Includes: []mb.Include{"artist-credits", "genres", "work-rels", "releases"},
 			}
+			startMB := time.Now()
+			l.Infow("Fetching MusicBrainz recording", "recording_id", getRecReq.ID)
 			recording, err = h.musicbrainzClient.Client.GetRecording(getRecReq)
+			l.Infow("Fetched MusicBrainz recording", "recording_id", getRecReq.ID, "duration_ms", time.Since(startMB).Milliseconds())
 			if err != nil {
 				l.Errorf("error fetching recording: %v", err)
 
 				// Attempt to fetch the second recording if available
 				if len(recs.Recordings) > 1 {
 					getRecReq.ID = recs.Recordings[1].ID
+					startMB2 := time.Now()
+					l.Infow("Fetching MusicBrainz recording (fallback)", "recording_id", getRecReq.ID)
 					recording, err = h.musicbrainzClient.Client.GetRecording(getRecReq)
+					l.Infow("Fetched MusicBrainz recording (fallback)", "recording_id", getRecReq.ID, "duration_ms", time.Since(startMB2).Milliseconds())
 					if err != nil {
 						l.Errorf("error fetching second recording: %v", err)
 					}
@@ -52,7 +59,10 @@ func (h *GetTrackHandler) GetTrackV2(w http.ResponseWriter, isrc string) {
 
 			if len(*recording.Relations) == 0 && len(recs.Recordings) > 1 {
 				getRecReq.ID = recs.Recordings[1].ID
+				startMB3 := time.Now()
+				l.Infow("Fetching MusicBrainz recording (relations fallback)", "recording_id", getRecReq.ID)
 				recording, err = h.musicbrainzClient.Client.GetRecording(getRecReq)
+				l.Infow("Fetched MusicBrainz recording (relations fallback)", "recording_id", getRecReq.ID, "duration_ms", time.Since(startMB3).Milliseconds())
 				if err != nil {
 					l.Errorf("error fetching second recording: %v", err)
 				}
@@ -74,7 +84,7 @@ func (h *GetTrackHandler) GetTrackV2(w http.ResponseWriter, isrc string) {
 			track.Genres = getGenresForRecording(recording.Recording)
 
 			// If a work exists, get the song credits
-			work := h.getWorkFromRecording(recording.Recording)
+			work := h.getWorkFromRecordingWithLog(recording.Recording)
 			if work != nil {
 				track.SongCredits = getSongCreditsForWork(*work)
 			}
@@ -160,14 +170,20 @@ func (h *GetTrackHandler) GetTrackV1(w http.ResponseWriter, r *http.Request) {
 			ID:       recs.Recordings[0].ID,
 			Includes: []mb.Include{"artist-rels", "genres", "work-rels"},
 		}
+		startMB := time.Now()
+		l.Infow("Fetching MusicBrainz recording", "recording_id", getRecReq.ID)
 		recording, err = h.musicbrainzClient.Client.GetRecording(getRecReq)
+		l.Infow("Fetched MusicBrainz recording", "recording_id", getRecReq.ID, "duration_ms", time.Since(startMB).Milliseconds())
 		if err != nil {
 			l.Errorf("error fetching recording: %v", err)
 
 			// Attempt to fetch the second recording if available
 			if len(recs.Recordings) > 1 {
 				getRecReq.ID = recs.Recordings[1].ID
+				startMB2 := time.Now()
+				l.Infow("Fetching MusicBrainz recording (fallback)", "recording_id", getRecReq.ID)
 				recording, err = h.musicbrainzClient.Client.GetRecording(getRecReq)
+				l.Infow("Fetched MusicBrainz recording (fallback)", "recording_id", getRecReq.ID, "duration_ms", time.Since(startMB2).Milliseconds())
 				if err != nil {
 					l.Errorf("error fetching second recording: %v", err)
 				}
@@ -176,7 +192,10 @@ func (h *GetTrackHandler) GetTrackV1(w http.ResponseWriter, r *http.Request) {
 
 		if len(*recording.Relations) == 0 && len(recs.Recordings) > 1 {
 			getRecReq.ID = recs.Recordings[1].ID
+			startMB3 := time.Now()
+			l.Infow("Fetching MusicBrainz recording (relations fallback)", "recording_id", getRecReq.ID)
 			recording, err = h.musicbrainzClient.Client.GetRecording(getRecReq)
+			l.Infow("Fetched MusicBrainz recording (relations fallback)", "recording_id", getRecReq.ID, "duration_ms", time.Since(startMB3).Milliseconds())
 			if err != nil {
 				l.Errorf("error fetching second recording: %v", err)
 			}
@@ -187,7 +206,7 @@ func (h *GetTrackHandler) GetTrackV1(w http.ResponseWriter, r *http.Request) {
 		track.Genres = getGenresForRecording(recording.Recording)
 
 		// If a work exists, get the song credits
-		work := h.getWorkFromRecording(recording.Recording)
+		work := h.getWorkFromRecordingWithLog(recording.Recording)
 		if work != nil {
 			track.SongCredits = getSongCreditsForWork(*work)
 		}
