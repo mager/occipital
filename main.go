@@ -112,8 +112,7 @@ func NewHTTPServer(
 	spotifyRecommendedTracksHandler := spotHandler.NewRecommendedTracksHandler(logger, spotifyClient)
 	router.Handle(spotifyRecommendedTracksHandler.Pattern(), spotifyRecommendedTracksHandler)
 
-	httpClient := &http.Client{}
-	spotifyGetTrackHandler := trackHandler.NewGetTrackHandler(logger, httpClient, spotifyClient, musicbrainzClient)
+	spotifyGetTrackHandler := trackHandler.NewGetTrackHandler(logger, spotifyClient, musicbrainzClient)
 	router.Handle(spotifyGetTrackHandler.Pattern(), spotifyGetTrackHandler)
 
 	discoverV1Handler := discoverHandler.NewDiscoverHandler(logger, fs, spotifyClient)

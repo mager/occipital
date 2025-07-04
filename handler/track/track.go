@@ -56,7 +56,6 @@ var (
 // GetTrackHandler is an http.Handler
 type GetTrackHandler struct {
 	log               *zap.SugaredLogger
-	httpClient        *http.Client
 	spotifyClient     *spotify.SpotifyClient
 	musicbrainzClient *musicbrainz.MusicbrainzClient
 }
@@ -68,13 +67,11 @@ func (*GetTrackHandler) Pattern() string {
 // NewGetTrackHandler builds a new GetTrackHandler.
 func NewGetTrackHandler(
 	log *zap.SugaredLogger,
-	httpClient *http.Client,
 	spotifyClient *spotify.SpotifyClient,
 	musicbrainzClient *musicbrainz.MusicbrainzClient,
 ) *GetTrackHandler {
 	return &GetTrackHandler{
 		log:               log,
-		httpClient:        httpClient,
 		spotifyClient:     spotifyClient,
 		musicbrainzClient: musicbrainzClient,
 	}
@@ -131,15 +128,15 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Name:              recording.Recording.Title,
 			Artist:            util.GetArtistCreditsFromRecording(*recording.Recording.ArtistCredits),
 			ReleaseDate:       recording.Recording.FirstReleaseDate,
-			Image:             getLatestReleaseImageURL(h.log, h.httpClient, recording.Recording),
+			Image:             getLatestReleaseImageURLWithLog(h.log, recording.Recording),
 			Instruments:       getArtistInstrumentsForRecording(recording.Recording),
 			ProductionCredits: getProductionCreditsForRecording(recording.Recording),
 			Genres:            getGenresForRecording(recording.Recording),
 			Links:             getExternalLinksForRecording(recording.Recording),
-			Releases:          getReleasesFromRecording(h.log, h.httpClient, recording.Recording),
+			Releases:          getReleasesFromRecordingWithLog(h.log, recording.Recording),
 		}
 
-		work := h.getWorkFromRecording(recording.Recording)
+		work := h.getWorkFromRecordingWithLog(recording.Recording)
 		if work != nil {
 			track.SongCredits = getSongCreditsForWork(*work)
 		}
@@ -338,7 +335,7 @@ func getSongCreditsForWork(rec mb.Work) []*occipital.TrackSongCredit {
 	return songCredits
 }
 
-func (h *GetTrackHandler) getWorkFromRecording(rec mb.Recording) *mb.Work {
+func (h *GetTrackHandler) getWorkFromRecordingWithLog(rec mb.Recording) *mb.Work {
 	for _, relation := range *rec.Relations {
 		if relation.TargetType == "work" {
 			work, err := h.musicbrainzClient.Client.GetWork(mb.GetWorkRequest{
@@ -371,7 +368,7 @@ func mapInitialTrack(r *http.Request, ft *spot.FullTrack) occipital.Track {
 	return track
 }
 
-func getLatestReleaseImageURL(l *zap.SugaredLogger, client *http.Client, recording mb.Recording) string {
+func getLatestReleaseImageURLWithLog(l *zap.SugaredLogger, recording mb.Recording) string {
 	if recording.Releases == nil || len(*recording.Releases) == 0 {
 		return ""
 	}
@@ -380,12 +377,7 @@ func getLatestReleaseImageURL(l *zap.SugaredLogger, client *http.Client, recordi
 		return ""
 	}
 	url := fmt.Sprintf("https://coverartarchive.org/release/%s", firstRelease.ID)
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return ""
-	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.0.0 Safari/537.36")
-	resp, err := client.Do(req)
+	resp, err := http.Get(url)
 	if err != nil || resp.StatusCode != http.StatusOK {
 		return ""
 	}
@@ -409,7 +401,7 @@ func getLatestReleaseImageURL(l *zap.SugaredLogger, client *http.Client, recordi
 	return ""
 }
 
-func getLatestReleaseMBID(client *http.Client, recording mb.Recording) string {
+func getLatestReleaseMBIDV0(recording mb.Recording) string {
 	// Return early if there are no releases to check.
 	if recording.Releases == nil || len(*recording.Releases) == 0 {
 		return ""
@@ -419,16 +411,6 @@ func getLatestReleaseMBID(client *http.Client, recording mb.Recording) string {
 	var bestTime time.Time
 	var hasFoundReleaseWithImage bool
 
-	// Create a channel to receive the results from the goroutines.
-	results := make(chan struct {
-		releaseID string
-		hasImage  bool
-		time      time.Time
-	})
-
-	// Use a WaitGroup to wait for all goroutines to finish.
-	var wg sync.WaitGroup
-
 	// Iterate through each release associated with the recording.
 	for _, release := range *recording.Releases {
 		// A release must have an ID to be useful for cover art
@@ -436,69 +418,43 @@ func getLatestReleaseMBID(client *http.Client, recording mb.Recording) string {
 			continue
 		}
 
-		wg.Add(1)
-		go func(release mb.Release) {
-			defer wg.Done()
+		// Try parsing the date in different formats
+		var parsedTime time.Time
+		var err error
+		dateFormats := []string{"2006-01-02", "2006-01", "2006"}
 
-			// Try parsing the date in different formats
-			var parsedTime time.Time
-			var err error
-			dateFormats := []string{"2006-01-02", "2006-01", "2006"}
-
-			for _, format := range dateFormats {
-				parsedTime, err = time.Parse(format, release.Date)
-				if err == nil {
-					break
-				}
+		for _, format := range dateFormats {
+			parsedTime, err = time.Parse(format, release.Date)
+			if err == nil {
+				break
 			}
+		}
 
-			if err != nil {
-				// Skip releases with invalid dates
-				return
-			}
+		if err != nil {
+			// Skip releases with invalid dates
+			continue
+		}
 
-			// Check if this release has an image by making a HEAD request to Cover Art Archive
-			imageURL := getCoverArtArchiveImageURL(release.ID, "front", 500)
+		// Check if this release has an image by making a HEAD request to Cover Art Archive
+		imageURL := getCoverArtArchiveImageURL(release.ID, "front", 500)
 
-			// Use OPTIONS to check if the resource exists and supports GET/HEAD
-			req, err := http.NewRequest("HEAD", imageURL.String(), nil)
-			if err != nil {
-				return
-			}
-			req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.0.0 Safari/537.36")
-			resp, err := client.Do(req)
-			hasImage := err == nil && resp != nil && resp.StatusCode == http.StatusOK
-			if resp != nil {
-				resp.Body.Close()
-			}
+		// Use OPTIONS to check if the resource exists and supports GET/HEAD
+		resp, err := http.DefaultClient.Do(&http.Request{
+			Method: "OPTIONS",
+			URL:    imageURL,
+		})
+		hasImage := err == nil && resp != nil && resp.StatusCode == http.StatusOK
+		if resp != nil {
+			resp.Body.Close()
+		}
 
-			results <- struct {
-				releaseID string
-				hasImage  bool
-				time      time.Time
-			}{
-				releaseID: release.ID,
-				hasImage:  hasImage,
-				time:      parsedTime,
-			}
-		}(release)
-	}
-
-	// Close the results channel when all goroutines are finished.
-	go func() {
-		wg.Wait()
-		close(results)
-	}()
-
-	// Process the results from the channel.
-	for result := range results {
 		// If we haven't found a release with an image yet, or this one has an image
-		if !hasFoundReleaseWithImage || result.hasImage {
+		if !hasFoundReleaseWithImage || hasImage {
 			// If this is the first valid release found, or it's newer than the current best
-			if bestReleaseID == "" || result.time.After(bestTime) {
-				bestReleaseID = result.releaseID
-				bestTime = result.time
-				hasFoundReleaseWithImage = result.hasImage
+			if bestReleaseID == "" || parsedTime.After(bestTime) {
+				bestReleaseID = release.ID
+				bestTime = parsedTime
+				hasFoundReleaseWithImage = hasImage
 			}
 		}
 	}
@@ -527,7 +483,7 @@ func getExternalLinksForRecording(rec mb.Recording) []occipital.ExternalLink {
 	return links
 }
 
-func getReleasesFromRecording(l *zap.SugaredLogger, client *http.Client, rec mb.Recording) *[]occipital.Release {
+func getReleasesFromRecordingWithLog(l *zap.SugaredLogger, rec mb.Recording) *[]occipital.Release {
 	if rec.Releases == nil || rec.ArtistCredits == nil || len(*rec.ArtistCredits) == 0 {
 		return nil
 	}
@@ -541,7 +497,7 @@ func getReleasesFromRecording(l *zap.SugaredLogger, client *http.Client, rec mb.
 	var releasesMu sync.Mutex
 	releases := make([]occipital.Release, 0, len(*rec.Releases))
 	var wg sync.WaitGroup
-	sem := make(chan struct{}, 10) // limit to 10 concurrent requests
+	sem := make(chan struct{}, 5) // limit to 5 concurrent requests
 
 	for _, mbRelease := range *rec.Releases {
 		if mbRelease.Status != "Official" {
@@ -575,7 +531,7 @@ func getReleasesFromRecording(l *zap.SugaredLogger, client *http.Client, rec mb.
 				Title:          mbRelease.Title,
 				Disambiguation: mbReleaseCopy.Disambiguation,
 				Image:          getCoverArtArchiveImageURL(mbReleaseCopy.ID, "front", 250).String(),
-				Images:         getReleaseImagesForRelease(l, client, mbReleaseCopy.ID),
+				Images:         getReleaseImagesForReleaseWithLog(l, mbReleaseCopy.ID),
 			}
 			releasesMu.Lock()
 			releases = append(releases, release)
@@ -603,15 +559,10 @@ func getCoverArtArchiveImageURL(releaseID string, style string, size int) *url.U
 	return parsedURL
 }
 
-// getReleaseImagesForRelease fetches all images for a given release from the Cover Art Archive.
-func getReleaseImagesForRelease(l *zap.SugaredLogger, client *http.Client, releaseID string) *[]occipital.ReleaseImage {
+// getReleaseImagesForReleaseWithLog fetches all images for a given release from the Cover Art Archive.
+func getReleaseImagesForReleaseWithLog(l *zap.SugaredLogger, releaseID string) *[]occipital.ReleaseImage {
 	url := fmt.Sprintf("https://coverartarchive.org/release/%s", releaseID)
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil
-	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.0.0 Safari/537.36")
-	resp, err := client.Do(req)
+	resp, err := http.Get(url)
 	if err != nil || resp.StatusCode != http.StatusOK {
 		return nil
 	}

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 
 	"go.uber.org/zap"
-	"go.uber.org/zap/zaptest/observer"
 )
 
 // ProvideLogger provides a zap logger
@@ -29,12 +28,6 @@ func ProvideLogger() *zap.SugaredLogger {
 	defer logger.Sync()
 
 	return logger.Sugar()
-}
-
-// NewTestLogger returns a new logger and observed logs for testing.
-func NewTestLogger() (*zap.SugaredLogger, *observer.ObservedLogs) {
-	core, recorded := observer.New(zap.InfoLevel)
-	return zap.New(core).Sugar(), recorded
 }
 
 var Options = ProvideLogger
