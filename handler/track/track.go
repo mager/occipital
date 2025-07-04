@@ -99,6 +99,7 @@ type GetTrackResponse struct {
 func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	q := r.URL.Query()
+	isrc := q.Get("isrc")
 	mbid := q.Get("mbid")
 
 	l := h.log
@@ -125,6 +126,7 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		track := occipital.Track{
 			ID:                mbid,
+			ISRC:              isrc,
 			Name:              recording.Recording.Title,
 			Artist:            util.GetArtistCreditsFromRecording(*recording.Recording.ArtistCredits),
 			ReleaseDate:       recording.Recording.FirstReleaseDate,
@@ -145,6 +147,15 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(resp)
 		return
 	}
+
+	// V2 Version based on ISRC, start wtih Musicbrainz, then Spotify
+	if isrc != "" {
+		h.GetTrackV2(w, isrc)
+		return
+	}
+
+	// V1 Version
+	h.GetTrackV1(w, r)
 }
 
 func getArtistInstrumentsForRecording(rec mb.Recording) []*occipital.TrackInstrumentArtists {
