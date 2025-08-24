@@ -52,8 +52,23 @@ func (h *DiscoverV2Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.log.Errorw("Error decoding tracks doc", "source", sourceName, "err", err)
 			continue
 		}
-		for _, fsTrack := range tracksDoc.Tracks {
+		h.log.Infow("Fetched tracks from Firestore",
+			"source", sourceName,
+			"trackCount", len(tracksDoc.Tracks),
+			"tracksDoc", tracksDoc,
+		)
+		for i, fsTrack := range tracksDoc.Tracks {
+			h.log.Infow("Converting Firestore track",
+				"source", sourceName,
+				"index", i,
+				"fsTrack", fsTrack,
+			)
 			track := convertToOccipitalTrack(fsTrack, sourceName)
+			h.log.Infow("Converted to occipital track",
+				"source", sourceName,
+				"index", i,
+				"track", track,
+			)
 			allTracks = append(allTracks, track)
 		}
 		if today > latestDate {
@@ -80,6 +95,12 @@ func (h *DiscoverV2Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Tracks:  uniqueTracks,
 		Updated: latestDate,
 	}
+
+	h.log.Infow("Sending discover response",
+		"totalTracks", len(uniqueTracks),
+		"updated", latestDate,
+		"response", resp,
+	)
 
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		h.log.Error("Error encoding response", zap.Error(err))

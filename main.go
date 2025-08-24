@@ -16,6 +16,7 @@ import (
 	"github.com/mager/occipital/database"
 	fs "github.com/mager/occipital/firestore"
 	discoverHandler "github.com/mager/occipital/handler/discover"
+	"github.com/mager/occipital/handler/genre"
 	"github.com/mager/occipital/handler/health"
 	profileHandler "github.com/mager/occipital/handler/profile"
 	spotHandler "github.com/mager/occipital/handler/spotify"
@@ -64,6 +65,7 @@ func main() {
 			AsRoute(trackHandler.NewGetTrackHandler),
 			AsRoute(discoverHandler.NewDiscoverHandler),
 			AsRoute(discoverHandler.NewDiscoverV2Handler),
+			AsRoute(genre.NewGenreHandler),
 		),
 		fx.Invoke(func(*http.Server) {}),
 	).Run()
@@ -120,6 +122,9 @@ func NewHTTPServer(
 
 	discoverV2Handler := discoverHandler.NewDiscoverV2Handler(logger, fs)
 	router.Handle(discoverV2Handler.Pattern(), discoverV2Handler)
+
+	genreHandler := genre.NewGenreHandler(logger, spotifyClient, musicbrainzClient)
+	router.Handle(genreHandler.Pattern(), genreHandler)
 
 	// websocket handler
 	router.HandleFunc("/np", func(w http.ResponseWriter, r *http.Request) {
