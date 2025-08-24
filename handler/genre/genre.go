@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	mb "github.com/mager/musicbrainz-go/musicbrainz"
 	"github.com/mager/occipital/musicbrainz"
@@ -143,6 +144,14 @@ func (h *GenreHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if len(isrcsToEnrich) > 0 {
 			enrichmentCount = h.bulkEnrichWithMusicBrainz(ctx, tracksToEnrich, isrcsToEnrich)
 			h.log.Infow("bulk enrichment completed", "tracks_enriched", enrichmentCount, "total_isrcs", len(isrcsToEnrich))
+		}
+
+		// Fallback: enrich remaining tracks without ISRCs using artist/track search
+		remainingTracks := len(resp.Tracks) - len(tracksToEnrich)
+		if remainingTracks > 0 {
+			fallbackCount := h.fallbackEnrichment(ctx, resp.Tracks[len(tracksToEnrich):])
+			enrichmentCount += fallbackCount
+			h.log.Infow("fallback enrichment completed", "tracks_enriched", fallbackCount, "total_fallback", remainingTracks)
 		}
 
 		// Log popularity info for debugging
@@ -331,6 +340,39 @@ func (h *GenreHandler) bulkEnrichWithMusicBrainz(ctx context.Context, tracks []*
 
 	h.log.Infow("bulk enrichment completed", "tracks_enriched", enrichedCount, "total_tracks", len(tracks))
 	return enrichedCount
+}
+
+func (h *GenreHandler) fallbackEnrichment(ctx context.Context, tracks []GenreTrack) int {
+	if len(tracks) == 0 {
+		return 0
+	}
+
+	h.log.Infow("starting fallback enrichment", "tracks_count", len(tracks))
+
+	enrichedCount := 0
+	for i, track := range tracks {
+		// Only enrich a few tracks to avoid overwhelming MusicBrainz
+		if i >= 3 {
+			break
+		}
+
+		// Use the existing individual enrichment method
+		if h.enrichWithMusicBrainz(ctx, &track) {
+			enrichedCount++
+			// Add delay to be respectful to MusicBrainz
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+
+	h.log.Infow("fallback enrichment completed", "tracks_enriched", enrichedCount, "total_attempted", min(len(tracks), 3))
+	return enrichedCount
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func getFirstArtist(artists []spot.SimpleArtist) string {
