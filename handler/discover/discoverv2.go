@@ -3,8 +3,10 @@ package discover
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"cloud.google.com/go/firestore"
@@ -26,84 +28,195 @@ func (h *DiscoverV2Handler) Pattern() string {
 	return "/discover/v2"
 }
 
+// sourceConfig defines a source and its scoring weight
+type v2SourceConfig struct {
+	collection string
+	weight     float64
+	maxRank    float64
+}
+
+// v2Sources defines all melodex sources with their scoring weights.
+// Higher weight = better signal for fresh music discovery.
+var v2Sources = []v2SourceConfig{
+	{collection: "spotify_new_releases", weight: 1.0, maxRank: 100},
+	{collection: "reddit_fresh", weight: 0.9, maxRank: 50},
+	{collection: "hnhh", weight: 0.7, maxRank: 100},
+	{collection: "pitchfork_bnm", weight: 0.6, maxRank: 20},
+	{collection: "billboard", weight: 0.5, maxRank: 100},
+}
+
 func (h *DiscoverV2Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 	w.Header().Set("Content-Type", "application/json")
 
-	sources := []string{
-		"billboard",
-		"hypem",
-		"hnhh",
+	now := time.Now()
+
+	type scoredTrack struct {
+		track       occipital.Track
+		source      string
+		rank        int
+		weight      float64
+		maxRank     float64
+		sourceCount int
+		score       float64
 	}
 
-	today := time.Now().Format("2006-01-02")
-	var allTracks []occipital.Track
+	// Collect tracks from all sources, keyed by normalized artist+title
+	trackMap := make(map[string]*scoredTrack)
+	sourceMap := make(map[string]map[string]bool) // key -> set of sources
 	var latestDate string
 
-	for _, sourceName := range sources {
-		col := h.fs.Collection(sourceName)
-		doc, err := col.Doc(today).Get(ctx)
+	for _, src := range v2Sources {
+		tracks, dateUsed, err := h.fetchTracksWithFallback(ctx, now, src.collection)
 		if err != nil {
-			h.log.Errorw("Error fetching today's tracks", "source", sourceName, "err", err)
+			h.log.Warnw("Failed to fetch source, skipping",
+				"source", src.collection, "err", err)
 			continue
 		}
-		var tracksDoc fsClient.TracksDoc
-		if err := doc.DataTo(&tracksDoc); err != nil {
-			h.log.Errorw("Error decoding tracks doc", "source", sourceName, "err", err)
-			continue
-		}
-		h.log.Infow("Fetched tracks from Firestore",
-			"source", sourceName,
-			"trackCount", len(tracksDoc.Tracks),
-			"tracksDoc", tracksDoc,
+
+		h.log.Infow("Fetched tracks from source",
+			"source", src.collection,
+			"trackCount", len(tracks),
+			"date", dateUsed,
 		)
-		for i, fsTrack := range tracksDoc.Tracks {
-			h.log.Infow("Converting Firestore track",
-				"source", sourceName,
-				"index", i,
-				"fsTrack", fsTrack,
-			)
-			track := convertToOccipitalTrack(fsTrack, sourceName)
-			h.log.Infow("Converted to occipital track",
-				"source", sourceName,
-				"index", i,
-				"track", track,
-			)
-			allTracks = append(allTracks, track)
+
+		if dateUsed > latestDate {
+			latestDate = dateUsed
 		}
-		if today > latestDate {
-			latestDate = today
+
+		for _, fsTrack := range tracks {
+			oTrack := convertToOccipitalTrack(fsTrack, src.collection)
+			oTrack.Source = src.collection
+			key := normalizeTrackKey(fsTrack.Artist, fsTrack.Title)
+
+			if existing, ok := trackMap[key]; ok {
+				// Track already seen from another source — keep the one with higher source weight
+				if src.weight > existing.weight {
+					trackMap[key] = &scoredTrack{
+						track:   oTrack,
+						source:  src.collection,
+						rank:    fsTrack.Rank,
+						weight:  src.weight,
+						maxRank: src.maxRank,
+					}
+				}
+			} else {
+				trackMap[key] = &scoredTrack{
+					track:   oTrack,
+					source:  src.collection,
+					rank:    fsTrack.Rank,
+					weight:  src.weight,
+					maxRank: src.maxRank,
+				}
+			}
+
+			// Track source appearances for cross-source bonus
+			if sourceMap[key] == nil {
+				sourceMap[key] = make(map[string]bool)
+			}
+			sourceMap[key][src.collection] = true
 		}
 	}
 
-	// Sort by rank (ascending)
-	sort.Slice(allTracks, func(i, j int) bool {
-		return allTracks[i].Rank < allTracks[j].Rank
+	// Score all tracks
+	var results []scoredTrack
+	for key, st := range trackMap {
+		st.sourceCount = len(sourceMap[key])
+		st.score = computeScore(st.rank, st.weight, st.maxRank, st.sourceCount)
+		results = append(results, *st)
+	}
+
+	// Sort by score descending
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].score > results[j].score
 	})
 
-	// Deduplicate by artist
-	uniqueTracks := make([]occipital.Track, 0, len(allTracks))
-	artistSeen := make(map[string]bool)
-	for _, track := range allTracks {
-		if !artistSeen[track.Artist] {
-			uniqueTracks = append(uniqueTracks, track)
-			artistSeen[track.Artist] = true
-		}
+	// Convert to response
+	finalTracks := make([]occipital.Track, 0, len(results))
+	for _, r := range results {
+		r.track.Rank = 0 // Clear source-specific rank; order IS the rank now
+		finalTracks = append(finalTracks, r.track)
 	}
 
 	resp := &DiscoverResponse{
-		Tracks:  uniqueTracks,
+		Tracks:  finalTracks,
 		Updated: latestDate,
 	}
 
-	h.log.Infow("Sending discover response",
-		"totalTracks", len(uniqueTracks),
+	h.log.Infow("Discover v2 response",
+		"totalTracks", len(finalTracks),
 		"updated", latestDate,
-		"response", resp,
 	)
 
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		h.log.Error("Error encoding response", zap.Error(err))
 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 	}
+}
+
+// computeScore implements the melodex v2 scoring algorithm.
+//
+//	score = (source_weight * normalized_rank) + freshness_bonus + cross_source_bonus
+//
+// Freshness bonus is always 1.0 here (weeksOnChart not tracked at read time yet).
+// Cross-source: 2+ sources = +0.3, 3+ = +0.5.
+func computeScore(rank int, weight, maxRank float64, sourceCount int) float64 {
+	normalizedRank := 1.0 - (float64(rank) / maxRank)
+	normalizedRank = math.Max(0.0, math.Min(1.0, normalizedRank))
+
+	rankScore := weight * normalizedRank
+
+	// Freshness bonus — all tracks from today/recent are considered fresh
+	freshness := 1.0
+
+	// Cross-source bonus
+	crossSource := 0.0
+	if sourceCount >= 3 {
+		crossSource = 0.5
+	} else if sourceCount >= 2 {
+		crossSource = 0.3
+	}
+
+	return rankScore + freshness + crossSource
+}
+
+// normalizeTrackKey creates a lookup key for deduplication.
+// Strips feat/ft variations, lowercases everything.
+func normalizeTrackKey(artist, title string) string {
+	a := strings.ToLower(strings.TrimSpace(artist))
+	t := strings.ToLower(strings.TrimSpace(title))
+
+	for _, sep := range []string{" feat.", " ft.", " featuring ", " feat ", " ft "} {
+		if idx := strings.Index(a, sep); idx > 0 {
+			a = a[:idx]
+		}
+	}
+
+	return a + " - " + t
+}
+
+// fetchTracksWithFallback tries today, then falls back up to 5 days.
+func (h *DiscoverV2Handler) fetchTracksWithFallback(ctx context.Context, now time.Time, collection string) ([]fsClient.Track, string, error) {
+	col := h.fs.Collection(collection)
+
+	for i := 0; i <= maxDaysToLookBack; i++ {
+		date := now.AddDate(0, 0, -i).Format("2006-01-02")
+		doc, err := col.Doc(date).Get(ctx)
+		if err != nil {
+			continue
+		}
+		var tracksDoc fsClient.TracksDoc
+		if err := doc.DataTo(&tracksDoc); err != nil {
+			h.log.Warnw("Error decoding tracks doc",
+				"collection", collection, "date", date, "err", err)
+			continue
+		}
+		if i > 0 {
+			h.log.Infow("Using fallback date for source",
+				"collection", collection, "date", date, "daysBack", i)
+		}
+		return tracksDoc.Tracks, date, nil
+	}
+
+	return nil, "", nil // No data found — not an error, just skip this source
 }
