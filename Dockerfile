@@ -1,5 +1,5 @@
 # Stage 1: Build
-FROM golang:1.22-alpine as builder
+FROM golang:1.24-alpine as builder
 
 # Use a non-root user for security
 RUN adduser -D -g '' appuser
