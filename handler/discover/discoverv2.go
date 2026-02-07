@@ -65,9 +65,11 @@ func (h *DiscoverV2Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	trackMap := make(map[string]*scoredTrack)
 	sourceMap := make(map[string]map[string]bool) // key -> set of sources
 	artistCount := make(map[string]int)            // cap tracks per artist
+	thumbCount := make(map[string]int)             // cap tracks per album art
 	var latestDate string
 
 	const maxTracksPerArtist = 2
+	const maxTracksPerThumb = 1 // prevent same album cover flooding the wall
 
 	for _, src := range v2Sources {
 		tracks, dateUsed, err := h.fetchTracksWithFallback(ctx, now, src.collection)
@@ -113,7 +115,12 @@ func (h *DiscoverV2Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				if artistCount[artistKey] >= maxTracksPerArtist {
 					continue
 				}
+				// Skip if this album art already appeared (prevents same-album flooding)
+				if thumbCount[fsTrack.Thumb] >= maxTracksPerThumb {
+					continue
+				}
 				artistCount[artistKey]++
+				thumbCount[fsTrack.Thumb]++
 				trackMap[key] = &scoredTrack{
 					track:   oTrack,
 					source:  src.collection,
