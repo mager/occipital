@@ -63,7 +63,6 @@ func main() {
 			AsRoute(spotHandler.NewSearchHandler),
 			AsRoute(spotHandler.NewRecommendedTracksHandler),
 			AsRoute(trackHandler.NewGetTrackHandler),
-			AsRoute(discoverHandler.NewDiscoverHandler),
 			AsRoute(discoverHandler.NewDiscoverV2Handler),
 			AsRoute(genre.NewGenreHandler),
 		),
@@ -116,9 +115,6 @@ func NewHTTPServer(
 
 	spotifyGetTrackHandler := trackHandler.NewGetTrackHandler(logger, spotifyClient, musicbrainzClient)
 	router.Handle(spotifyGetTrackHandler.Pattern(), spotifyGetTrackHandler)
-
-	discoverV1Handler := discoverHandler.NewDiscoverHandler(logger, fs, spotifyClient)
-	router.Handle(discoverV1Handler.Pattern(), discoverV1Handler)
 
 	discoverV2Handler := discoverHandler.NewDiscoverV2Handler(logger, fs)
 	router.Handle(discoverV2Handler.Pattern(), discoverV2Handler)
