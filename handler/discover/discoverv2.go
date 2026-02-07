@@ -64,7 +64,10 @@ func (h *DiscoverV2Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Collect tracks from all sources, keyed by normalized artist+title
 	trackMap := make(map[string]*scoredTrack)
 	sourceMap := make(map[string]map[string]bool) // key -> set of sources
+	artistCount := make(map[string]int)            // cap tracks per artist
 	var latestDate string
+
+	const maxTracksPerArtist = 2
 
 	for _, src := range v2Sources {
 		tracks, dateUsed, err := h.fetchTracksWithFallback(ctx, now, src.collection)
@@ -85,9 +88,14 @@ func (h *DiscoverV2Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		for _, fsTrack := range tracks {
+			// Skip tracks without album art — they'd show as broken images
+			if fsTrack.Thumb == "" {
+				continue
+			}
 			oTrack := convertToOccipitalTrack(fsTrack, src.collection)
 			oTrack.Source = src.collection
 			key := normalizeTrackKey(fsTrack.Artist, fsTrack.Title)
+			artistKey := normalizeArtist(fsTrack.Artist)
 
 			if existing, ok := trackMap[key]; ok {
 				// Track already seen from another source — keep the one with higher source weight
@@ -101,6 +109,11 @@ func (h *DiscoverV2Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			} else {
+				// Skip if this artist already has enough tracks
+				if artistCount[artistKey] >= maxTracksPerArtist {
+					continue
+				}
+				artistCount[artistKey]++
 				trackMap[key] = &scoredTrack{
 					track:   oTrack,
 					source:  src.collection,
@@ -131,6 +144,12 @@ func (h *DiscoverV2Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return results[i].score > results[j].score
 	})
 
+	// Cap at 100 tracks
+	const maxDiscoverTracks = 150
+	if len(results) > maxDiscoverTracks {
+		results = results[:maxDiscoverTracks]
+	}
+
 	// Convert to response
 	finalTracks := make([]occipital.Track, 0, len(results))
 	for _, r := range results {
@@ -156,43 +175,39 @@ func (h *DiscoverV2Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // computeScore implements the melodex v2 scoring algorithm.
 //
-//	score = (source_weight * normalized_rank) + freshness_bonus + cross_source_bonus
+//	score = (source_weight * normalized_rank²) + cross_source_bonus
 //
-// Freshness bonus is always 1.0 here (weeksOnChart not tracked at read time yet).
-// Cross-source: 2+ sources = +0.3, 3+ = +0.5.
+// Uses exponential rank decay so top-ranked tracks score much higher.
+// Cross-source bonus rewards tracks appearing on multiple charts.
 func computeScore(rank int, weight, maxRank float64, sourceCount int) float64 {
 	normalizedRank := 1.0 - (float64(rank) / maxRank)
 	normalizedRank = math.Max(0.0, math.Min(1.0, normalizedRank))
+	rankScore := weight * (normalizedRank * normalizedRank)
 
-	rankScore := weight * normalizedRank
-
-	// Freshness bonus — all tracks from today/recent are considered fresh
-	freshness := 1.0
-
-	// Cross-source bonus
 	crossSource := 0.0
 	if sourceCount >= 3 {
-		crossSource = 0.5
+		crossSource = 1.0
 	} else if sourceCount >= 2 {
-		crossSource = 0.3
+		crossSource = 0.5
 	}
 
-	return rankScore + freshness + crossSource
+	return rankScore + crossSource
 }
 
-// normalizeTrackKey creates a lookup key for deduplication.
-// Strips feat/ft variations, lowercases everything.
-func normalizeTrackKey(artist, title string) string {
+// normalizeArtist strips feat/ft variations and lowercases the artist name.
+func normalizeArtist(artist string) string {
 	a := strings.ToLower(strings.TrimSpace(artist))
-	t := strings.ToLower(strings.TrimSpace(title))
-
 	for _, sep := range []string{" feat.", " ft.", " featuring ", " feat ", " ft "} {
 		if idx := strings.Index(a, sep); idx > 0 {
 			a = a[:idx]
 		}
 	}
+	return a
+}
 
-	return a + " - " + t
+// normalizeTrackKey creates a lookup key for deduplication.
+func normalizeTrackKey(artist, title string) string {
+	return normalizeArtist(artist) + " - " + strings.ToLower(strings.TrimSpace(title))
 }
 
 // fetchTracksWithFallback tries today, then falls back up to 5 days.

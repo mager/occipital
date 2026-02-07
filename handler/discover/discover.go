@@ -27,5 +27,8 @@ func convertToOccipitalTrack(fsTrack fsClient.Track, thumbType string) occipital
 }
 
 func getSpotifyThumb(th string) string {
+	if th == "" {
+		return ""
+	}
 	return fmt.Sprintf("https://i.scdn.co/image/%s", th)
 }
