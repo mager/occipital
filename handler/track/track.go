@@ -163,8 +163,11 @@ func getArtistInstrumentsForRecording(rec mb.Recording) []*occipital.TrackInstru
 	instrumentMap := make(map[string]map[string]occipital.CreditArtist)
 
 	// Iterate over relations and group artists by instrument
+	if rec.Relations == nil {
+		return nil
+	}
 	for _, relation := range *rec.Relations {
-		if relation.Type == "instrument" && len(relation.Attributes) == 1 {
+		if relation.Type == "instrument" && len(relation.Attributes) == 1 && relation.Artist != nil {
 			instrumentName := relation.Attributes[0]
 			artistID := relation.Artist.ID
 			artistName := relation.Artist.Name
@@ -283,6 +286,9 @@ func getGenresForRecording(rec mb.Recording) []string {
 }
 
 func getProductionCreditsForRecording(rec mb.Recording) []*occipital.TrackProductionCredit {
+	if rec.Relations == nil {
+		return nil
+	}
 	creditMap := make(map[string]map[string]occipital.CreditArtist)
 
 	supportedTypes := []string{"producer", "mix", "recording", "vocal"}
