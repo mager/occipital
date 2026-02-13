@@ -99,9 +99,15 @@ type TrackArtistInstruments struct {
 	Instruments []string `json:"instruments"`
 }
 
+// CreditArtist represents an artist with their MusicBrainz ID
+type CreditArtist struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 type TrackInstrumentArtists struct {
-	Artists    []string `json:"artists"`
-	Instrument string   `json:"instrument"`
+	Artists    []CreditArtist `json:"artists"`
+	Instrument string         `json:"instrument"`
 }
 
 type TrackArtistProduction struct {
@@ -110,13 +116,13 @@ type TrackArtistProduction struct {
 }
 
 type TrackProductionCredit struct {
-	Credit  string   `json:"credit"`
-	Artists []string `json:"artists"`
+	Credit  string         `json:"credit"`
+	Artists []CreditArtist `json:"artists"`
 }
 
 type TrackSongCredit struct {
-	Credit  string   `json:"credit"`
-	Artists []string `json:"artists"`
+	Credit  string         `json:"credit"`
+	Artists []CreditArtist `json:"artists"`
 }
 
 type TrackAnalysis struct {
@@ -166,4 +172,35 @@ type ReleaseImage struct {
 	ID    int64  `json:"id"`
 	Type  string `json:"type"`
 	Image string `json:"image"`
+}
+
+// Creator represents a music creator (artist, producer, engineer, etc.)
+type Creator struct {
+	ID             string          `json:"id"`
+	Name           string          `json:"name"`
+	Type           string          `json:"type"`
+	Disambiguation string          `json:"disambiguation,omitempty"`
+	Country        string          `json:"country,omitempty"`
+	Area           string          `json:"area,omitempty"`
+	BeginArea      string          `json:"begin_area,omitempty"`
+	ActiveYears    *ActiveYears    `json:"active_years,omitempty"`
+	Genres         []string        `json:"genres"`
+	Links          []ExternalLink  `json:"links"`
+	Credits        []CreatorCredit `json:"credits"`
+}
+
+type ActiveYears struct {
+	Begin string `json:"begin,omitempty"`
+	End   string `json:"end,omitempty"`
+	Ended bool   `json:"ended"`
+}
+
+type CreatorCredit struct {
+	Type       string             `json:"type"`
+	Recordings []CreatorRecording `json:"recordings"`
+}
+
+type CreatorRecording struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
 }

@@ -10,7 +10,10 @@ require (
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/lib/pq v1.10.9
 	github.com/mager/go-musixmatch v0.0.0-20240928222852-036f3bd702ce
-	github.com/mager/musicbrainz-go v0.0.25
+	github.com/mager/musicbrainz-go v0.0.26
+)
+
+require (
 	github.com/zmb3/spotify/v2 v2.4.2
 	go.uber.org/fx v1.22.0
 	go.uber.org/zap v1.27.0

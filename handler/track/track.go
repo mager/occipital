@@ -159,12 +159,14 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func getArtistInstrumentsForRecording(rec mb.Recording) []*occipital.TrackInstrumentArtists {
-	instrumentMap := make(map[string]map[string]struct{})
+	// Map instrument -> artist ID -> CreditArtist (dedup by ID)
+	instrumentMap := make(map[string]map[string]occipital.CreditArtist)
 
 	// Iterate over relations and group artists by instrument
 	for _, relation := range *rec.Relations {
 		if relation.Type == "instrument" && len(relation.Attributes) == 1 {
 			instrumentName := relation.Attributes[0]
+			artistID := relation.Artist.ID
 			artistName := relation.Artist.Name
 
 			if mappedInstrumentName, ok := instrumentMappings[instrumentName]; ok {
@@ -172,21 +174,26 @@ func getArtistInstrumentsForRecording(rec mb.Recording) []*occipital.TrackInstru
 			}
 
 			if instrumentMap[instrumentName] == nil {
-				instrumentMap[instrumentName] = make(map[string]struct{})
+				instrumentMap[instrumentName] = make(map[string]occipital.CreditArtist)
 			}
 
-			instrumentMap[instrumentName][artistName] = struct{}{}
+			instrumentMap[instrumentName][artistID] = occipital.CreditArtist{
+				ID:   artistID,
+				Name: artistName,
+			}
 		}
 	}
 
 	var instrumentArtists []*occipital.TrackInstrumentArtists
 	for instrument, artistSet := range instrumentMap {
-		artists := make([]string, 0, len(artistSet))
-		for artist := range artistSet {
-			artists = append(artists, artist)
+		artists := make([]occipital.CreditArtist, 0, len(artistSet))
+		for _, ca := range artistSet {
+			artists = append(artists, ca)
 		}
 
-		sort.Strings(artists)
+		sort.Slice(artists, func(i, j int) bool {
+			return artists[i].Name < artists[j].Name
+		})
 
 		instrumentArtists = append(instrumentArtists, &occipital.TrackInstrumentArtists{
 			Instrument: instrument,
@@ -276,26 +283,34 @@ func getGenresForRecording(rec mb.Recording) []string {
 }
 
 func getProductionCreditsForRecording(rec mb.Recording) []*occipital.TrackProductionCredit {
-	creditMap := make(map[string][]string)
+	creditMap := make(map[string]map[string]occipital.CreditArtist)
 
 	supportedTypes := []string{"producer", "mix", "recording", "vocal"}
 
 	for _, relation := range *rec.Relations {
 		for _, supportedType := range supportedTypes {
-			if relation.Type == supportedType {
-				creditMap[supportedType] = append(creditMap[supportedType], relation.Artist.Name)
+			if relation.Type == supportedType && relation.Artist != nil {
+				if creditMap[supportedType] == nil {
+					creditMap[supportedType] = make(map[string]occipital.CreditArtist)
+				}
+				creditMap[supportedType][relation.Artist.ID] = occipital.CreditArtist{
+					ID:   relation.Artist.ID,
+					Name: relation.Artist.Name,
+				}
 			}
 		}
 	}
 
 	var productionCredits []*occipital.TrackProductionCredit
-	for creditType, artists := range creditMap {
-		uniqueArtists := uniqueStrings(artists)
+	for creditType, artistMap := range creditMap {
+		artists := make([]occipital.CreditArtist, 0, len(artistMap))
+		for _, ca := range artistMap {
+			artists = append(artists, ca)
+		}
 
-		// Append a new TrackProductionCredit with the creditType and unique artists
 		productionCredits = append(productionCredits, &occipital.TrackProductionCredit{
 			Credit:  creditType,
-			Artists: uniqueArtists,
+			Artists: artists,
 		})
 	}
 
@@ -321,25 +336,33 @@ func uniqueStrings(strs []string) []string {
 }
 
 func getSongCreditsForWork(rec mb.Work) []*occipital.TrackSongCredit {
-	creditMap := make(map[string][]string)
+	creditMap := make(map[string]map[string]occipital.CreditArtist)
 
 	supportedTypes := []string{"composer", "lyricist", "writer"}
 	for _, relation := range *rec.Relations {
 		for _, supportedType := range supportedTypes {
-			if relation.Type == supportedType {
-				creditMap[supportedType] = append(creditMap[supportedType], relation.Artist.Name)
+			if relation.Type == supportedType && relation.Artist != nil {
+				if creditMap[supportedType] == nil {
+					creditMap[supportedType] = make(map[string]occipital.CreditArtist)
+				}
+				creditMap[supportedType][relation.Artist.ID] = occipital.CreditArtist{
+					ID:   relation.Artist.ID,
+					Name: relation.Artist.Name,
+				}
 			}
 		}
 	}
 
 	var songCredits []*occipital.TrackSongCredit
-	for creditType, artists := range creditMap {
-		uniqueArtists := uniqueStrings(artists)
+	for creditType, artistMap := range creditMap {
+		artists := make([]occipital.CreditArtist, 0, len(artistMap))
+		for _, ca := range artistMap {
+			artists = append(artists, ca)
+		}
 
-		// Append a new TrackSongCredit with the creditType and unique artists
 		songCredits = append(songCredits, &occipital.TrackSongCredit{
 			Credit:  creditType,
-			Artists: uniqueArtists,
+			Artists: artists,
 		})
 	}
 
