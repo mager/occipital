@@ -152,7 +152,7 @@ type TrackAnalysisSegment struct {
 
 // ExternalLink is an external link from Musicbrainz
 type ExternalLink struct {
-	Type string `json:"string"`
+	Type string `json:"type"`
 	URL  string `json:"url"`
 }
 

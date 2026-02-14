@@ -115,6 +115,7 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"artist-credits",
 				"artist-rels",
 				"genres",
+				"isrcs",
 				"releases",
 				"work-rels",
 				"url-rels",
@@ -136,6 +137,44 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Genres:            getGenresForRecording(recording.Recording),
 			Links:             getExternalLinksForRecording(recording.Recording),
 			Releases:          getReleasesFromRecordingWithLog(h.log, recording.Recording),
+		}
+
+		// If no ISRC was passed in the query, try to get one from the recording
+		if track.ISRC == "" && recording.Recording.ISRCs != nil && len(*recording.Recording.ISRCs) > 0 {
+			track.ISRC = (*recording.Recording.ISRCs)[0]
+		}
+
+		// Enrich with Spotify: if we have an ISRC and no Spotify link from MB relations,
+		// search Spotify by ISRC to get the source_id and guarantee the link
+		hasSpotifyLink := false
+		for _, link := range track.Links {
+			if link.Type == "spotify" {
+				hasSpotifyLink = true
+				break
+			}
+		}
+		if track.ISRC != "" && !hasSpotifyLink {
+			l.Infow("Enriching with Spotify via ISRC", "isrc", track.ISRC)
+			ctx := r.Context()
+			results, err := h.spotifyClient.Client.Search(ctx, fmt.Sprintf("isrc:%s", track.ISRC), spot.SearchTypeTrack)
+			if err != nil {
+				l.Warnw("Spotify ISRC search failed", "error", err)
+			} else if results.Tracks != nil && len(results.Tracks.Tracks) > 0 {
+				spotTrack := results.Tracks.Tracks[0]
+				spotURL := fmt.Sprintf("https://open.spotify.com/track/%s", spotTrack.ID)
+				track.SourceID = string(spotTrack.ID)
+				track.Source = "SPOTIFY"
+				track.Links = append(track.Links, occipital.ExternalLink{
+					Type: "spotify",
+					URL:  spotURL,
+				})
+				l.Infow("Spotify enrichment successful", "spotify_id", spotTrack.ID)
+
+				// Use Spotify image if MB didn't provide one
+				if track.Image == "" && len(spotTrack.Album.Images) > 0 {
+					track.Image = spotTrack.Album.Images[0].URL
+				}
+			}
 		}
 
 		work := h.getWorkFromRecordingWithLog(recording.Recording)

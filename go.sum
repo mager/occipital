@@ -160,6 +160,8 @@ github.com/mager/musicbrainz-go v0.0.27 h1:blgQm3SoUmC8CnQMG+iPHSCqealt1hndcqPKQ
 github.com/mager/musicbrainz-go v0.0.27/go.mod h1:OIWNG0Eu7Q9TebOWZDUkSiouCyB4GS6hz6dXVnT1QP0=
 github.com/mager/musicbrainz-go v0.0.28 h1:ZSwc60oK6U4o0JKu+aMPcJ/gY0UWi/En30tbrNvYGWU=
 github.com/mager/musicbrainz-go v0.0.28/go.mod h1:OIWNG0Eu7Q9TebOWZDUkSiouCyB4GS6hz6dXVnT1QP0=
+github.com/mager/musicbrainz-go v0.0.29 h1:9ZynNfDizRnTrYa0vrLhsCQ0kG2war8Benh7DcatM0Q=
+github.com/mager/musicbrainz-go v0.0.29/go.mod h1:OIWNG0Eu7Q9TebOWZDUkSiouCyB4GS6hz6dXVnT1QP0=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/prometheus/client_model v0.0.0-20190812154241-14fe0d1b01d4/go.mod h1:xMI15A0UPsDsEKsMN9yxemIoYk6Tm2C1GtYGdfGttqA=
