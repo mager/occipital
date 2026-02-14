@@ -202,8 +202,9 @@ type CreatorCredit struct {
 }
 
 type CreatorRecording struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Artist string `json:"artist,omitempty"`
 }
 
 // CreatorHighlight represents a popular track associated with a creator

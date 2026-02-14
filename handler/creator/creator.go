@@ -62,6 +62,7 @@ func (h *GetCreatorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"genres",
 			"url-rels",
 			"recording-rels",
+			"artist-credits",
 		},
 	})
 	if err != nil {
@@ -249,9 +250,20 @@ func extractCredits(artist mb.Artist) []occipital.CreatorCredit {
 				creditType = rel.Attributes[0]
 			}
 
+			// Extract artist name from recording's artist-credit
+			artist := ""
+			if rel.Recording.ArtistCredits != nil {
+				var parts []string
+				for _, ac := range *rel.Recording.ArtistCredits {
+					parts = append(parts, ac.Name+ac.JoinPhrase)
+				}
+				artist = strings.Join(parts, "")
+			}
+
 			creditMap[creditType] = append(creditMap[creditType], occipital.CreatorRecording{
-				ID:    rel.Recording.ID,
-				Title: rel.Recording.Title,
+				ID:     rel.Recording.ID,
+				Title:  rel.Recording.Title,
+				Artist: artist,
 			})
 		}
 	}
