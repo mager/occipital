@@ -1,7 +1,9 @@
 package creator
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
@@ -9,6 +11,8 @@ import (
 	mb "github.com/mager/musicbrainz-go/musicbrainz"
 	"github.com/mager/occipital/musicbrainz"
 	"github.com/mager/occipital/occipital"
+	"github.com/mager/occipital/spotify"
+	spotifyLib "github.com/zmb3/spotify/v2"
 	"go.uber.org/zap"
 )
 
@@ -16,6 +20,7 @@ import (
 type GetCreatorHandler struct {
 	log               *zap.SugaredLogger
 	musicbrainzClient *musicbrainz.MusicbrainzClient
+	spotifyClient     *spotify.SpotifyClient
 }
 
 func (*GetCreatorHandler) Pattern() string {
@@ -26,10 +31,12 @@ func (*GetCreatorHandler) Pattern() string {
 func NewGetCreatorHandler(
 	log *zap.SugaredLogger,
 	musicbrainzClient *musicbrainz.MusicbrainzClient,
+	spotifyClient *spotify.SpotifyClient,
 ) *GetCreatorHandler {
 	return &GetCreatorHandler{
 		log:               log,
 		musicbrainzClient: musicbrainzClient,
+		spotifyClient:     spotifyClient,
 	}
 }
 
@@ -65,8 +72,78 @@ func (h *GetCreatorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	creator := transformArtistToCreator(artistResp.Artist)
 
+	// Fetch Spotify highlights
+	highlights := h.fetchHighlights(creator.Links)
+	if len(highlights) > 0 {
+		creator.Highlights = highlights
+	}
+
 	resp := GetCreatorResponse{Creator: creator}
 	json.NewEncoder(w).Encode(resp)
+}
+
+// fetchHighlights extracts the Spotify artist ID from links and fetches top tracks.
+func (h *GetCreatorHandler) fetchHighlights(links []occipital.ExternalLink) []occipital.CreatorHighlight {
+	spotifyID := extractSpotifyArtistID(links)
+	if spotifyID == "" {
+		return nil
+	}
+
+	h.log.Infow("Fetching Spotify top tracks", "spotifyArtistID", spotifyID)
+
+	ctx := context.Background()
+	topTracks, err := h.spotifyClient.Client.GetArtistsTopTracks(ctx, spotifyLib.ID(spotifyID), "US")
+	if err != nil {
+		h.log.Warnw("Failed to fetch Spotify top tracks", "err", err)
+		return nil
+	}
+
+	var highlights []occipital.CreatorHighlight
+	for _, track := range topTracks {
+		image := ""
+		if track.Album.Images != nil && len(track.Album.Images) > 0 {
+			image = track.Album.Images[0].URL
+		}
+
+		// Build artist string
+		var artists []string
+		for _, a := range track.Artists {
+			artists = append(artists, a.Name)
+		}
+
+		highlights = append(highlights, occipital.CreatorHighlight{
+			ID:     string(track.ID),
+			Title:  track.Name,
+			Artist: strings.Join(artists, ", "),
+			Image:  image,
+		})
+	}
+
+	// Cap at 10 highlights
+	if len(highlights) > 10 {
+		highlights = highlights[:10]
+	}
+
+	return highlights
+}
+
+// extractSpotifyArtistID finds the Spotify artist ID from MusicBrainz URL relations.
+// Looks for URLs like https://open.spotify.com/artist/XXXXX
+func extractSpotifyArtistID(links []occipital.ExternalLink) string {
+	for _, link := range links {
+		if strings.Contains(link.URL, "open.spotify.com/artist/") {
+			parts := strings.Split(link.URL, "/artist/")
+			if len(parts) == 2 {
+				// Strip any query params
+				id := parts[1]
+				if idx := strings.Index(id, "?"); idx > 0 {
+					id = id[:idx]
+				}
+				return id
+			}
+		}
+	}
+	return ""
 }
 
 func transformArtistToCreator(artist mb.Artist) occipital.Creator {
@@ -191,6 +268,28 @@ func extractCredits(artist mb.Artist) []occipital.CreatorCredit {
 	sort.Slice(credits, func(i, j int) bool {
 		return len(credits[i].Recordings) > len(credits[j].Recordings)
 	})
+
+	// Consolidate: keep top 10 credit types, merge the rest into "other"
+	const maxCreditTypes = 10
+	if len(credits) > maxCreditTypes {
+		var otherRecordings []occipital.CreatorRecording
+		seen := make(map[string]bool)
+		for _, c := range credits[maxCreditTypes:] {
+			for _, r := range c.Recordings {
+				if !seen[r.ID] {
+					seen[r.ID] = true
+					otherRecordings = append(otherRecordings, r)
+				}
+			}
+		}
+		credits = credits[:maxCreditTypes]
+		if len(otherRecordings) > 0 {
+			credits = append(credits, occipital.CreatorCredit{
+				Type:       fmt.Sprintf("other (%d types)", len(credits)),
+				Recordings: otherRecordings,
+			})
+		}
+	}
 
 	return credits
 }

@@ -124,7 +124,7 @@ func NewHTTPServer(
 	genreHandler := genre.NewGenreHandler(logger, spotifyClient, musicbrainzClient)
 	router.Handle(genreHandler.Pattern(), genreHandler)
 
-	getCreatorHandler := creatorHandler.NewGetCreatorHandler(logger, musicbrainzClient)
+	getCreatorHandler := creatorHandler.NewGetCreatorHandler(logger, musicbrainzClient, spotifyClient)
 	router.Handle(getCreatorHandler.Pattern(), getCreatorHandler)
 
 	// websocket handler

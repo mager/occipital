@@ -185,8 +185,9 @@ type Creator struct {
 	BeginArea      string          `json:"begin_area,omitempty"`
 	ActiveYears    *ActiveYears    `json:"active_years,omitempty"`
 	Genres         []string        `json:"genres"`
-	Links          []ExternalLink  `json:"links"`
-	Credits        []CreatorCredit `json:"credits"`
+	Links          []ExternalLink     `json:"links"`
+	Credits        []CreatorCredit    `json:"credits"`
+	Highlights     []CreatorHighlight `json:"highlights,omitempty"`
 }
 
 type ActiveYears struct {
@@ -203,4 +204,12 @@ type CreatorCredit struct {
 type CreatorRecording struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
+}
+
+// CreatorHighlight represents a popular track associated with a creator
+type CreatorHighlight struct {
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Artist string `json:"artist"`
+	Image  string `json:"image"`
 }
