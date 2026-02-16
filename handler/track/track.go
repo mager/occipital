@@ -101,10 +101,17 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	isrc := q.Get("isrc")
 	mbid := q.Get("mbid")
+	spotifyId := q.Get("spotifyId")
 
 	l := h.log
 
 	var resp GetTrackResponse
+
+	// V4: Spotify-first flow
+	if spotifyId != "" {
+		h.handleSpotifyFirst(w, r, spotifyId)
+		return
+	}
 
 	// V3 Version based on MBID, MusicBrainz recording ID
 	if mbid != "" {
@@ -195,6 +202,155 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// V1 Version
 	h.GetTrackV1(w, r)
+}
+
+// handleSpotifyFirst implements the Spotify-first flow:
+// 1. Fetch Spotify track → name, artist, image, ISRC
+// 2. Fetch audio features → danceability, energy, tempo, key, etc.
+// 3. Fetch audio analysis → segments with loudness data
+// 4. Use ISRC to search MusicBrainz → hydrate with credits, genres, releases, links
+func (h *GetTrackHandler) handleSpotifyFirst(w http.ResponseWriter, r *http.Request, spotifyId string) {
+	ctx := r.Context()
+	l := h.log
+	l.Infow("Spotify-first track lookup", "spotify_id", spotifyId)
+
+	sid := spot.ID(spotifyId)
+
+	// Step 1: Fetch the Spotify track
+	fullTrack, err := h.spotifyClient.Client.GetTrack(ctx, sid)
+	if err != nil {
+		l.Errorf("error fetching Spotify track: %v", err)
+		http.Error(w, "Track not found", http.StatusNotFound)
+		return
+	}
+
+	// Build initial track from Spotify data
+	track := occipital.Track{
+		SourceID: spotifyId,
+		Source:   "SPOTIFY",
+		Name:     fullTrack.Name,
+		Artist:   util.GetFirstArtist(fullTrack.Artists),
+	}
+
+	// Image
+	if len(fullTrack.Album.Images) > 0 {
+		track.Image = fullTrack.Album.Images[0].URL
+	}
+
+	// ISRC
+	if isrcVal, ok := fullTrack.ExternalIDs["isrc"]; ok {
+		track.ISRC = isrcVal
+	}
+
+	// Release date
+	track.ReleaseDate = fullTrack.Album.ReleaseDate
+
+	// Spotify link
+	track.Links = []occipital.ExternalLink{
+		{Type: "spotify", URL: fmt.Sprintf("https://open.spotify.com/track/%s", spotifyId)},
+	}
+
+	// Step 2: Fetch audio features
+	features, err := h.spotifyClient.Client.GetAudioFeatures(ctx, sid)
+	if err != nil {
+		l.Warnw("Failed to fetch audio features", "error", err)
+	} else if len(features) > 0 && features[0] != nil {
+		af := features[0]
+		track.Meta = &occipital.TrackMeta{
+			DurationMs:    int(af.Duration),
+			Key:           int(af.Key),
+			Mode:          int(af.Mode),
+			Tempo:         af.Tempo,
+			TimeSignature: int(af.TimeSignature),
+		}
+		track.Features = &occipital.TrackFeatures{
+			Acousticness:     af.Acousticness,
+			Danceability:     af.Danceability,
+			Energy:           af.Energy,
+			Happiness:        af.Valence,
+			Instrumentalness: af.Instrumentalness,
+			Liveness:         af.Liveness,
+			Loudness:         af.Loudness,
+			Speechiness:      af.Speechiness,
+		}
+	}
+
+	// Step 3: Fetch audio analysis
+	analysis, err := h.spotifyClient.Client.GetAudioAnalysis(ctx, sid)
+	if err != nil {
+		l.Warnw("Failed to fetch audio analysis", "error", err)
+	} else if analysis != nil {
+		trackAnalysis := occipital.TrackAnalysis{
+			Duration: analysis.Track.Duration,
+		}
+		for _, seg := range analysis.Segments {
+			trackAnalysis.Segments = append(trackAnalysis.Segments, occipital.TrackAnalysisSegment{
+				Start:         seg.Start,
+				Duration:      seg.Duration,
+				Confidence:    seg.Confidence,
+				LoudnessStart: seg.LoudnessStart,
+				LoudnessEnd:   seg.LoudnessEnd,
+				LoudnessMax:   seg.LoudnessMax,
+				Pitches:       seg.Pitches,
+				Timbres:       seg.Timbre,
+			})
+		}
+		track.Analysis = &trackAnalysis
+	}
+
+	// Step 4: Use ISRC to find MusicBrainz recording and hydrate
+	if track.ISRC != "" {
+		l.Infow("Searching MusicBrainz by ISRC", "isrc", track.ISRC)
+		searchResp, err := h.musicbrainzClient.Client.SearchRecordingsByISRC(mb.SearchRecordingsByISRCRequest{
+			ISRC: track.ISRC,
+		})
+		if err != nil {
+			l.Warnw("MusicBrainz ISRC search failed", "error", err)
+		} else if searchResp.Count > 0 {
+			// Get full recording with all includes
+			mbid := searchResp.Recordings[0].ID
+			track.ID = mbid
+			l.Infow("Found MusicBrainz recording", "mbid", mbid)
+
+			recording, err := h.musicbrainzClient.Client.GetRecording(mb.GetRecordingRequest{
+				ID: mbid,
+				Includes: []mb.Include{
+					"artist-credits",
+					"artist-rels",
+					"genres",
+					"isrcs",
+					"releases",
+					"work-rels",
+					"url-rels",
+				},
+			})
+			if err != nil {
+				l.Warnw("Failed to fetch MusicBrainz recording details", "error", err)
+			} else {
+				// Step 5: Hydrate with MusicBrainz data
+				track.Instruments = getArtistInstrumentsForRecording(recording.Recording)
+				track.ProductionCredits = getProductionCreditsForRecording(recording.Recording)
+				track.Genres = getGenresForRecording(recording.Recording)
+				track.Releases = getReleasesFromRecordingWithLog(l, recording.Recording)
+
+				// Add external links from MB (genius, etc.) - skip spotify since we already have it
+				for _, link := range getExternalLinksForRecording(recording.Recording) {
+					if link.Type != "spotify" {
+						track.Links = append(track.Links, link)
+					}
+				}
+
+				// Get song credits from the work
+				work := h.getWorkFromRecordingWithLog(recording.Recording)
+				if work != nil {
+					track.SongCredits = getSongCreditsForWork(*work)
+				}
+			}
+		}
+	}
+
+	resp := GetTrackResponse{Track: track}
+	json.NewEncoder(w).Encode(resp)
 }
 
 func getArtistInstrumentsForRecording(rec mb.Recording) []*occipital.TrackInstrumentArtists {
