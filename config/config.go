@@ -9,8 +9,9 @@ import (
 type Config struct {
 	DatabaseURL string
 
-	SpotifyID     string
-	SpotifySecret string
+	SpotifyID          string
+	SpotifySecret      string
+	SpotifyRedirectURL string
 
 	MusixmatchAPIKey string
 }

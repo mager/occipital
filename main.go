@@ -74,6 +74,7 @@ func main() {
 
 func NewHTTPServer(
 	lc fx.Lifecycle,
+	cfg config.Config,
 	db *sql.DB,
 	fs *firestore.Client,
 	spotifyClient *spotify.SpotifyClient,
@@ -126,6 +127,23 @@ func NewHTTPServer(
 
 	getCreatorHandler := creatorHandler.NewGetCreatorHandler(logger, musicbrainzClient, spotifyClient)
 	router.Handle(getCreatorHandler.Pattern(), getCreatorHandler)
+
+	// Spotify OAuth handlers
+	authLoginHandler := spotHandler.NewAuthLoginHandler(logger, cfg)
+	router.Handle(authLoginHandler.Pattern(), authLoginHandler)
+
+	authCallbackHandler := spotHandler.NewAuthCallbackHandler(logger, cfg, fs)
+	router.Handle(authCallbackHandler.Pattern(), authCallbackHandler)
+
+	// Spotify playback handlers
+	playHandler := spotHandler.NewPlayHandler(logger, cfg, fs)
+	router.Handle(playHandler.Pattern(), playHandler)
+
+	pauseHandler := spotHandler.NewPauseHandler(logger, cfg, fs)
+	router.Handle(pauseHandler.Pattern(), pauseHandler)
+
+	devicesHandler := spotHandler.NewDevicesHandler(logger, cfg, fs)
+	router.Handle(devicesHandler.Pattern(), devicesHandler)
 
 	// websocket handler
 	router.HandleFunc("/np", func(w http.ResponseWriter, r *http.Request) {
