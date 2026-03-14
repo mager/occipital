@@ -18,6 +18,7 @@ import (
 	discoverHandler "github.com/mager/occipital/handler/discover"
 	"github.com/mager/occipital/handler/genre"
 	"github.com/mager/occipital/handler/health"
+	podcastHandler "github.com/mager/occipital/handler/podcast"
 	profileHandler "github.com/mager/occipital/handler/profile"
 	spotHandler "github.com/mager/occipital/handler/spotify"
 	creatorHandler "github.com/mager/occipital/handler/creator"
@@ -66,6 +67,8 @@ func main() {
 			AsRoute(trackHandler.NewGetTrackHandler),
 			AsRoute(discoverHandler.NewDiscoverV2Handler),
 			AsRoute(genre.NewGenreHandler),
+			AsRoute(podcastHandler.NewCategoriesHandler),
+			AsRoute(podcastHandler.NewShowsHandler),
 			AsRoute(creatorHandler.NewGetCreatorHandler),
 		),
 		fx.Invoke(func(*http.Server) {}),
@@ -127,6 +130,13 @@ func NewHTTPServer(
 
 	getCreatorHandler := creatorHandler.NewGetCreatorHandler(logger, musicbrainzClient, spotifyClient)
 	router.Handle(getCreatorHandler.Pattern(), getCreatorHandler)
+
+	// Podcast handlers
+	podcastCategoriesHandler := podcastHandler.NewCategoriesHandler(logger, fs)
+	router.Handle(podcastCategoriesHandler.Pattern(), podcastCategoriesHandler)
+
+	podcastShowsHandler := podcastHandler.NewShowsHandler(logger, fs)
+	router.Handle(podcastShowsHandler.Pattern(), podcastShowsHandler)
 
 	// Spotify OAuth handlers
 	authLoginHandler := spotHandler.NewAuthLoginHandler(logger, cfg)
