@@ -334,3 +334,20 @@ func (h *GetTrackV2Handler) saveToCache(ctx context.Context, spotifyId string, t
 	}
 	h.log.Infow("Track cached", "spotify_id", spotifyId)
 }
+
+func (h *GetTrackV2Handler) getWorkFromRecordingWithLog(rec mb.Recording) *mb.Work {
+	for _, relation := range *rec.Relations {
+		if relation.TargetType == "work" {
+			work, err := h.musicbrainzClient.Client.GetWork(mb.GetWorkRequest{
+				ID:       relation.Work.ID,
+				Includes: []mb.Include{"artist-rels", "url-rels"},
+			})
+			if err != nil {
+				h.log.Errorf("error fetching work: %v", err)
+				return nil
+			}
+			return &work.Work
+		}
+	}
+	return nil
+}
