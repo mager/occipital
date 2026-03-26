@@ -122,6 +122,10 @@ func NewHTTPServer(
 	spotifyGetTrackHandler := trackHandler.NewGetTrackHandler(logger, spotifyClient, musicbrainzClient)
 	router.Handle(spotifyGetTrackHandler.Pattern(), spotifyGetTrackHandler)
 
+	// v2: parallel + cached track handler
+	trackV2Handler := trackHandler.NewGetTrackV2Handler(logger, spotifyClient, musicbrainzClient, fs)
+	router.Handle(trackV2Handler.Pattern(), trackV2Handler)
+
 	discoverV2Handler := discoverHandler.NewDiscoverV2Handler(logger, fs)
 	router.Handle(discoverV2Handler.Pattern(), discoverV2Handler)
 

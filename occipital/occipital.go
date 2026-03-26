@@ -22,7 +22,8 @@ type Track struct {
 	ProductionCredits []*TrackProductionCredit  `json:"production_credits"`
 	SongCredits       []*TrackSongCredit        `json:"song_credits"`
 
-	Rank int `json:"rank,omitempty"`
+	Rank       int `json:"rank,omitempty"`
+	Popularity int `json:"popularity,omitempty"`
 }
 
 type TrackMeta struct {
