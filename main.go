@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -47,6 +48,9 @@ type Route interface {
 // @host		localhost:8080
 // @BasePath	/
 func main() {
+	if err := musicbrainz.ConfigureHTTPTransport(); err != nil {
+		log.Fatal(err)
+	}
 	fx.New(
 		fx.Provide(NewHTTPServer,
 			config.Options,
