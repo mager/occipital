@@ -26,7 +26,7 @@ var spotifyTrackIDPattern = regexp.MustCompile(`^[A-Za-z0-9]{22}$`)
 const (
 	trackCacheCollection = "track_cache_v2"
 	trackCacheTTL        = 7 * 24 * time.Hour
-	trackCacheVersion    = 2
+	trackCacheVersion    = 3
 	trackRequestTimeout  = 8 * time.Second
 )
 
@@ -120,14 +120,14 @@ func (h *GetTrackV2Handler) fetchParallel(ctx context.Context, spotifyId string)
 	trackCh := make(chan *spot.FullTrack, 1)
 
 	var (
-		mu          sync.Mutex
-		fullTrack   *spot.FullTrack
-		audioFeats  []*spot.AudioFeatures
-		audioAnal   *spot.AudioAnalysis
-		mbRecording *mb.Recording
-		trackErr    error
-		mbWork      *mb.Work
-		workErr     error
+		mu            sync.Mutex
+		fullTrack     *spot.FullTrack
+		audioFeats    []*spot.AudioFeatures
+		audioAnal     *spot.AudioAnalysis
+		mbRecording   *mb.Recording
+		trackErr      error
+		mbWork        *mb.Work
+		enrichmentErr error
 	)
 
 	var wg sync.WaitGroup
@@ -193,12 +193,13 @@ func (h *GetTrackV2Handler) fetchParallel(ctx context.Context, spotifyId string)
 		}
 		mbCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
-		rec := h.findRecording(mbCtx, ft)
+		rec, err := h.findRecording(mbCtx, ft)
+		enrichmentErr = err
 		if rec == nil {
 			return
 		}
 		mbRecording = rec
-		mbWork, workErr = h.getWorkFromRecordingContext(mbCtx, *rec)
+		mbWork, enrichmentErr = h.getWorkFromRecordingContext(mbCtx, *rec)
 	}()
 
 	wg.Wait()
@@ -296,9 +297,9 @@ func (h *GetTrackV2Handler) fetchParallel(ctx context.Context, spotifyId string)
 	}
 
 	sanitizeTrackMetadata(&track)
-	// A known work lookup failure is transient. Return the partial track, but
+	// A failed metadata lookup must remain retryable. Return the partial track, but
 	// do not store it for the normal seven-day recording cache lifetime.
-	return track, workErr == nil, nil
+	return track, enrichmentErr == nil, nil
 }
 
 // --- Cache helpers ---

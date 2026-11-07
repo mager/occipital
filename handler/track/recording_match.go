@@ -58,20 +58,20 @@ func quoteSearch(s string) string {
 	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) + `"`
 }
 
-func (h *GetTrackV2Handler) findRecording(ctx context.Context, ft *spot.FullTrack) *mb.Recording {
+func (h *GetTrackV2Handler) findRecording(ctx context.Context, ft *spot.FullTrack) (*mb.Recording, error) {
 	id := ""
 	if isrc := ft.ExternalIDs["isrc"]; isrc != "" {
 		result, err := h.musicbrainzClient.SearchRecordingsContext(ctx, "isrc:"+quoteSearch(isrc))
 		if err != nil {
 			h.log.Warnw("MusicBrainz ISRC unavailable", "error", err)
-			return nil
+			return nil, err
 		}
 		if result.Count <= len(result.Recordings) {
 			id = selectRecording(result.Recordings, ft, true)
 		}
 		// Ambiguous ISRC evidence must not be replaced by a weaker name match.
 		if id == "" && len(result.Recordings) > 0 {
-			return nil
+			return nil, nil
 		}
 	}
 	if id == "" && len(ft.Artists) > 0 && ft.Name != "" {
@@ -79,21 +79,24 @@ func (h *GetTrackV2Handler) findRecording(ctx context.Context, ft *spot.FullTrac
 		result, err := h.musicbrainzClient.SearchRecordingsContext(ctx, query)
 		if err != nil {
 			h.log.Warnw("MusicBrainz name search unavailable", "error", err)
-			return nil
+			return nil, err
 		}
 		if result.Count <= len(result.Recordings) {
 			id = selectRecording(result.Recordings, ft, false)
 		}
 	}
 	if id == "" {
-		return nil
+		return nil, nil
 	}
 	rec, err := h.musicbrainzClient.GetRecordingContext(ctx, id)
-	if err != nil || rec.ID != id {
+	if err != nil {
 		h.log.Warnw("MusicBrainz recording unavailable", "error", err)
-		return nil
+		return nil, err
 	}
-	return &rec
+	if rec.ID != id {
+		return nil, fmt.Errorf("MusicBrainz returned an unexpected recording")
+	}
+	return &rec, nil
 }
 
 // Restore release information without a network request for every cover image.

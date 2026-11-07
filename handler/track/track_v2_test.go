@@ -169,6 +169,7 @@ func TestTrackCacheRejectsStaleSchemaAndEmptyResults(t *testing.T) {
 	}{
 		{"current", trackCacheVersion, time.Minute, valid, true},
 		{"old schema", 0, time.Minute, valid, false},
+		{"previous partial schema", 2, time.Minute, valid, false},
 		{"expired incomplete", trackCacheVersion, 2 * time.Hour, valid, false},
 		{"empty upstream", trackCacheVersion, time.Minute, `{"source_id":"42UBPzRMh5yyz0EDPr6fr1"}`, false},
 		{"future timestamp", trackCacheVersion, -time.Hour, valid, false},
@@ -229,5 +230,33 @@ func TestTrackV2RecordingWithoutWorkRemainsCacheable(t *testing.T) {
 	result, canCache, err := h.fetchParallel(context.Background(), "42UBPzRMh5yyz0EDPr6fr1")
 	if err != nil || result.ID != "recording-id" || !canCache {
 		t.Fatalf("recording with no work should remain cacheable: %+v, %v, %v", result, canCache, err)
+	}
+}
+
+func TestTrackV2FailedMusicBrainzLookupSkipsCache(t *testing.T) {
+	for _, stage := range []string{"search", "recording"} {
+		t.Run(stage, func(t *testing.T) {
+			h := testTrackHandler(t, func(r *http.Request) (int, string) {
+				if stage == "search" || strings.Contains(r.URL.Path, "/recording/") {
+					return 503, `{}`
+				}
+				return 200, `{"count":1,"recordings":[{"id":"recording-id","title":"Manchild","artist-credit":[{"artist":{"name":"Sabrina Carpenter"}}]}]}`
+			}, 200)
+			result, canCache, err := h.fetchParallel(context.Background(), "42UBPzRMh5yyz0EDPr6fr1")
+			if err != nil || result.Name != "Manchild" {
+				t.Fatalf("basic track was lost: %+v, %v", result, err)
+			}
+			if canCache {
+				t.Fatal("failed MusicBrainz lookup must stay retryable")
+			}
+		})
+	}
+}
+
+func TestTrackV2StableNoMatchRemainsCacheable(t *testing.T) {
+	h := testTrackHandler(t, func(r *http.Request) (int, string) { return 200, `{"count":0,"recordings":[]}` }, 200)
+	result, canCache, err := h.fetchParallel(context.Background(), "42UBPzRMh5yyz0EDPr6fr1")
+	if err != nil || result.Name != "Manchild" || result.ID != "" || !canCache {
+		t.Fatalf("stable no-match was not cacheable: %+v, %v, %v", result, canCache, err)
 	}
 }
