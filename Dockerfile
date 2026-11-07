@@ -1,5 +1,5 @@
 # Stage 1: Build
-FROM golang:1.24-alpine as builder
+FROM golang:1.24-alpine AS builder
 
 # Use a non-root user for security
 RUN adduser -D -g '' appuser
@@ -14,7 +14,7 @@ RUN go mod download
 COPY . ./
 
 # Build the Go application
-RUN go build -mod=readonly -v -o server
+RUN CGO_ENABLED=0 go build -mod=readonly -v -o server
 
 # Stage 2: Run 
 FROM debian:12-slim 

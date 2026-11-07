@@ -3,8 +3,13 @@ package spotify
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"sort"
+	"strings"
+	"time"
+	"unicode/utf8"
 
 	spot "github.com/zmb3/spotify/v2"
 
@@ -13,8 +18,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// SearchHandler is an http.Handler that copies its request body
-// back to the response.
+// SearchHandler searches the public track catalog without user authorization.
 type SearchHandler struct {
 	log           *zap.SugaredLogger
 	spotifyClient *spotify.SpotifyClient
@@ -59,30 +63,73 @@ type SearchTrack struct {
 // @Success 200 {object} SearchResponse
 // @Router /spotify/search [post]
 func (h *SearchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	ctx := context.Background()
 	var req SearchRequest
 	w.Header().Set("Content-Type", "application/json")
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		util.WriteJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 
-	// Validate search query
-	if req.Query == "" {
-		http.Error(w, "missing search query", http.StatusBadRequest)
-		return
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	defer r.Body.Close()
+	decoder := json.NewDecoder(r.Body)
+	err := decoder.Decode(&req)
+	if err == nil {
+		// Reject trailing values and read to EOF so the size limit covers the body.
+		if trailingErr := decoder.Decode(new(any)); trailingErr != io.EOF {
+			err = trailingErr
+			if err == nil {
+				err = errors.New("multiple JSON values")
+			}
+		}
 	}
-
-	h.log.Infow("search", "query", req.Query)
-
-	results, err := h.spotifyClient.Client.Search(ctx, req.Query, spot.SearchTypeTrack)
 	if err != nil {
-		http.Error(w, "search error: "+err.Error(), http.StatusInternalServerError)
+		var sizeErr *http.MaxBytesError
+		if errors.As(err, &sizeErr) {
+			util.WriteJSONError(w, http.StatusRequestEntityTooLarge, "request body too large")
+		} else {
+			util.WriteJSONError(w, http.StatusBadRequest, "invalid JSON request")
+		}
 		return
 	}
 
-	var resp SearchResponse
+	req.Query = strings.TrimSpace(req.Query)
+	if req.Query == "" {
+		util.WriteJSONError(w, http.StatusBadRequest, "missing search query")
+		return
+	}
+	if utf8.RuneCountInString(req.Query) > 200 {
+		util.WriteJSONError(w, http.StatusBadRequest, "search query too long")
+		return
+	}
+	if req.Limit < 0 {
+		util.WriteJSONError(w, http.StatusBadRequest, "limit must not be negative")
+		return
+	}
+	if req.Limit == 0 {
+		req.Limit = 20
+	} else if req.Limit > 50 {
+		req.Limit = 50
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+	results, err := h.spotifyClient.Client.Search(ctx, req.Query, spot.SearchTypeTrack, spot.Limit(req.Limit))
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			util.WriteJSONError(w, http.StatusGatewayTimeout, "search timed out")
+			return
+		}
+		h.log.Errorw("Spotify search failed", "error", err)
+		util.WriteJSONError(w, http.StatusBadGateway, "search unavailable")
+		return
+	}
+
+	resp := SearchResponse{Results: make([]SearchTrack, 0)}
 
 	if results.Tracks != nil {
 		for _, item := range results.Tracks.Tracks {

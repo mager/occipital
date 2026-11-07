@@ -3,6 +3,8 @@ package spotify
 import (
 	"context"
 	"log"
+	"net/http"
+	"time"
 
 	"github.com/mager/occipital/config"
 	"github.com/zmb3/spotify/v2"
@@ -19,7 +21,9 @@ type SpotifyClient struct {
 }
 
 func ProvideSpotify(cfg config.Config) *SpotifyClient {
-	ctx := context.Background()
+	// Token refresh uses this context separately from API request contexts.
+	// Give it a finite HTTP timeout as well.
+	ctx := context.WithValue(context.Background(), oauth2.HTTPClient, &http.Client{Timeout: 10 * time.Second})
 
 	var c SpotifyClient
 
@@ -41,6 +45,7 @@ func ProvideSpotify(cfg config.Config) *SpotifyClient {
 
 	// Create the client with the token source
 	httpClient := oauth2.NewClient(ctx, tokenSource)
+	httpClient.Timeout = 10 * time.Second
 	client := spotify.New(httpClient)
 
 	c.Client = client

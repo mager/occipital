@@ -8,11 +8,8 @@ import (
 	"go.uber.org/zap"
 )
 
-// HealthHandler is an http.Handler that copies its request body
-// back to the response.
+// HealthHandler exposes only the server's liveness status.
 type HealthHandler struct {
-	log           *zap.SugaredLogger
-	spotifyClient *spotify.SpotifyClient
 }
 
 func (*HealthHandler) Pattern() string {
@@ -21,30 +18,15 @@ func (*HealthHandler) Pattern() string {
 
 // NewHealthHandler builds a new HealthHandler.
 func NewHealthHandler(log *zap.SugaredLogger, spotifyClient *spotify.SpotifyClient) *HealthHandler {
-	return &HealthHandler{
-		log:           log,
-		spotifyClient: spotifyClient,
-	}
+	return &HealthHandler{}
 }
 
 type Response struct {
-	Server  bool `json:"server"`
-	Spotify bool `json:"spotify"`
+	Server bool `json:"server"`
 }
 
-// ServeHTTP handles an HTTP request to the /echo endpoint.
+// ServeHTTP handles the public liveness check.
 func (h *HealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	var resp Response
-
-	h.log.Info("health check")
-
-	resp.Server = true
-
-	// Make sure Spotify client is set up properly
-	if h.spotifyClient.ID != "" && h.spotifyClient.Secret != "" {
-		resp.Spotify = true
-	}
-
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	json.NewEncoder(w).Encode(Response{Server: true})
 }

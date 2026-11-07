@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
 	"database/sql"
-	"log"
 	"net"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"cloud.google.com/go/firestore"
 	"github.com/golang-jwt/jwt/v5"
@@ -15,18 +17,19 @@ import (
 	"github.com/mager/occipital/config"
 	"github.com/mager/occipital/database"
 	fs "github.com/mager/occipital/firestore"
+	creatorHandler "github.com/mager/occipital/handler/creator"
 	discoverHandler "github.com/mager/occipital/handler/discover"
 	"github.com/mager/occipital/handler/genre"
 	"github.com/mager/occipital/handler/health"
 	podcastHandler "github.com/mager/occipital/handler/podcast"
 	profileHandler "github.com/mager/occipital/handler/profile"
 	spotHandler "github.com/mager/occipital/handler/spotify"
-	creatorHandler "github.com/mager/occipital/handler/creator"
 	trackHandler "github.com/mager/occipital/handler/track"
 	userHandler "github.com/mager/occipital/handler/user"
 	"github.com/mager/occipital/logger"
 	"github.com/mager/occipital/musicbrainz"
 	"github.com/mager/occipital/spotify"
+	"github.com/mager/occipital/util"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
 )
@@ -87,14 +90,24 @@ func NewHTTPServer(
 	router := mux.NewRouter()
 
 	router.Use(jsonMiddleware)
-	srv := &http.Server{Addr: ":8080", Handler: router}
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	srv := &http.Server{
+		Addr: ":" + port, Handler: apiKeyMiddleware(router, os.Getenv("BEATBRAIN_API_KEY")),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
 			ln, err := net.Listen("tcp", srv.Addr)
 			if err != nil {
 				return err
 			}
-			logger.Infof("Starting HTTP server at", srv.Addr)
+			logger.Infof("Starting HTTP server at %s", srv.Addr)
 			go srv.Serve(ln)
 			return nil
 		},
@@ -184,6 +197,24 @@ func jsonMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// apiKeyMiddleware permits data access only through the trusted app server.
+// A missing configuration fails closed in local and deployed environments.
+func apiKeyMiddleware(next http.Handler, key string) http.Handler {
+	expected := sha256.Sum256([]byte(key))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/health" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		provided := sha256.Sum256([]byte(r.Header.Get("X-Beatbrain-Key")))
+		if key == "" || subtle.ConstantTimeCompare(expected[:], provided[:]) != 1 {
+			util.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 var (
 	nextSecret = os.Getenv("OCCIPITAL_NEXTAUTHSECRET")
 )
@@ -192,26 +223,24 @@ var (
 func authNMiddleware(next http.Handler, logger *zap.SugaredLogger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		secret := nextSecret
-		tokenString := r.Header.Get("Authorization")
-		if tokenString == "" {
-			logger.Info("Error: No token")
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		tokenString := extractTokenFromHeader(r.Header.Get("Authorization"))
+		if secret == "" || tokenString == "" {
+			util.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
-		tokenString = extractTokenFromHeader(tokenString)
 
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 			return []byte(secret), nil
-		})
+		}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}))
 		if err != nil {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			util.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
 
 		if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
 			logger.Infow("Successful authentication", "email", claims["email"])
 		} else {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			util.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
 
@@ -222,10 +251,10 @@ func authNMiddleware(next http.Handler, logger *zap.SugaredLogger) http.Handler 
 // Extracts the token value from the Authorization header
 func extractTokenFromHeader(header string) string {
 	// Split the header value by whitespace
-	split := strings.SplitN(header, " ", 2)
+	split := strings.Fields(header)
 
 	if len(split) != 2 || strings.ToLower(split[0]) != "bearer" {
-		log.Fatal("Invalid Authorization header format")
+		return ""
 	}
 
 	return split[1]

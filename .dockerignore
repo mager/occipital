@@ -1,0 +1,16 @@
+.git
+.claude
+.entire
+.env
+.env.*
+**/.env
+**/.env.*
+credentials*.json
+**/credentials*.json
+*service-account*.json
+**/*service-account*.json
+*.pem
+*.key
+server
+.vscode
+launch.json
