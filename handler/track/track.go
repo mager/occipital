@@ -537,6 +537,9 @@ func uniqueStrings(strs []string) []string {
 }
 
 func getSongCreditsForWork(rec mb.Work) []*occipital.TrackSongCredit {
+	if rec.Relations == nil {
+		return nil
+	}
 	creditMap := make(map[string]map[string]occipital.CreditArtist)
 
 	supportedTypes := []string{"composer", "lyricist", "writer"}
@@ -571,8 +574,11 @@ func getSongCreditsForWork(rec mb.Work) []*occipital.TrackSongCredit {
 }
 
 func (h *GetTrackHandler) getWorkFromRecordingWithLog(rec mb.Recording) *mb.Work {
+	if rec.Relations == nil {
+		return nil
+	}
 	for _, relation := range *rec.Relations {
-		if relation.TargetType == "work" {
+		if relation.TargetType == "work" && relation.Work != nil && relation.Work.ID != "" {
 			work, err := h.musicbrainzClient.Client.GetWork(mb.GetWorkRequest{
 				ID:       relation.Work.ID,
 				Includes: []mb.Include{"artist-rels", "url-rels"},
@@ -698,6 +704,9 @@ func getLatestReleaseMBIDV0(recording mb.Recording) string {
 }
 
 func getExternalLinksForRecording(rec mb.Recording) []occipital.ExternalLink {
+	if rec.Relations == nil {
+		return nil
+	}
 	var links []occipital.ExternalLink
 	for _, rel := range *rec.Relations {
 		if rel.TargetType == "url" {

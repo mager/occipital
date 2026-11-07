@@ -9,6 +9,7 @@ type Track struct {
 	Source   string `json:"source,omitempty"`
 	Image    string `json:"image"`
 
+	Album    *TrackAlbum    `json:"album,omitempty"`
 	Meta     *TrackMeta     `json:"meta"`
 	Features *TrackFeatures `json:"features"`
 	Analysis *TrackAnalysis `json:"analysis"`
@@ -26,6 +27,16 @@ type Track struct {
 	Popularity int `json:"popularity,omitempty"`
 }
 
+// TrackAlbum describes the selected Spotify edition, independently of audio features.
+type TrackAlbum struct {
+	ID                   string `json:"id"`
+	Name                 string `json:"name"`
+	ReleaseDate          string `json:"release_date"`
+	ReleaseDatePrecision string `json:"release_date_precision"`
+	AlbumType            string `json:"album_type"`
+	URL                  string `json:"url"`
+}
+
 type TrackMeta struct {
 	// DurationMs is the duration of the track in milliseconds.
 	// Example: 237040
@@ -35,7 +46,7 @@ type TrackMeta struct {
 	// Example: 9
 	Key int `json:"key"`
 	// Mode indicates the modality (major or minor) of a track, the type of scale from which its melodic content is derived.
-	// Major is represented by 1 and minor is 0.
+	// Major is represented by 1 and minor is 0. Unknown is -1.
 	// Example: 0
 	Mode int `json:"mode"`
 	// Tempo is the overall estimated tempo of a track in beats per minute (BPM). In musical terminology, tempo is the speed or pace of a given piece and derives directly from the average beat duration.
@@ -177,15 +188,15 @@ type ReleaseImage struct {
 
 // Creator represents a music creator (artist, producer, engineer, etc.)
 type Creator struct {
-	ID             string          `json:"id"`
-	Name           string          `json:"name"`
-	Type           string          `json:"type"`
-	Disambiguation string          `json:"disambiguation,omitempty"`
-	Country        string          `json:"country,omitempty"`
-	Area           string          `json:"area,omitempty"`
-	BeginArea      string          `json:"begin_area,omitempty"`
-	ActiveYears    *ActiveYears    `json:"active_years,omitempty"`
-	Genres         []string        `json:"genres"`
+	ID             string             `json:"id"`
+	Name           string             `json:"name"`
+	Type           string             `json:"type"`
+	Disambiguation string             `json:"disambiguation,omitempty"`
+	Country        string             `json:"country,omitempty"`
+	Area           string             `json:"area,omitempty"`
+	BeginArea      string             `json:"begin_area,omitempty"`
+	ActiveYears    *ActiveYears       `json:"active_years,omitempty"`
+	Genres         []string           `json:"genres"`
 	Links          []ExternalLink     `json:"links"`
 	Credits        []CreatorCredit    `json:"credits"`
 	Highlights     []CreatorHighlight `json:"highlights,omitempty"`

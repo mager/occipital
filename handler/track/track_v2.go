@@ -3,8 +3,11 @@ package track
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
 	"net/http"
+	"regexp"
 	"sync"
 	"time"
 
@@ -18,12 +21,17 @@ import (
 	"go.uber.org/zap"
 )
 
+var spotifyTrackIDPattern = regexp.MustCompile(`^[A-Za-z0-9]{22}$`)
+
 const (
 	trackCacheCollection = "track_cache_v2"
 	trackCacheTTL        = 7 * 24 * time.Hour
+	trackCacheVersion    = 2
+	trackRequestTimeout  = 8 * time.Second
 )
 
 type cachedTrackDoc struct {
+	Version   int       `firestore:"version"`
 	TrackJSON string    `firestore:"track_json"`
 	CachedAt  time.Time `firestore:"cached_at"`
 }
@@ -57,12 +65,14 @@ func NewGetTrackV2Handler(
 // ServeHTTP handles GET /v2/track?spotifyId=xxx
 func (h *GetTrackV2Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	ctx := r.Context()
+	ctx, cancel := context.WithTimeout(r.Context(), trackRequestTimeout)
+	defer cancel()
 	q := r.URL.Query()
 	spotifyId := q.Get("spotifyId")
 
-	if spotifyId == "" {
-		http.Error(w, `{"error":"spotifyId required"}`, http.StatusBadRequest)
+	if !spotifyTrackIDPattern.MatchString(spotifyId) {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "valid spotifyId required"})
 		return
 	}
 
@@ -74,33 +84,50 @@ func (h *GetTrackV2Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.log.Infow("Cache miss — fetching", "spotify_id", spotifyId)
-	track := h.fetchParallel(ctx, spotifyId)
+	track, canCache, err := h.fetchParallel(ctx, spotifyId)
+	if err != nil {
+		status := http.StatusBadGateway
+		if errors.Is(err, context.DeadlineExceeded) {
+			status = http.StatusGatewayTimeout
+		}
+		w.WriteHeader(status)
+		json.NewEncoder(w).Encode(map[string]string{"error": "track unavailable"})
+		return
+	}
 
 	// Fire-and-forget cache write
-	go h.saveToCache(context.Background(), spotifyId, &track)
+	if canCache && ctx.Err() == nil {
+		go func() {
+			cacheCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			h.saveToCache(cacheCtx, spotifyId, &track)
+		}()
+	}
 
 	json.NewEncoder(w).Encode(GetTrackResponse{Track: track})
 }
 
-// fetchParallel fans out all external calls optimally:
+// fetchParallel fetches optional metadata within the request deadline:
 //
 //	t=0 → Spotify: GetTrack, GetAudioFeatures, GetAudioAnalysis (all concurrent)
-//	t=ISRC → MusicBrainz: SearchByISRC → GetRecording → GetWork (starts as soon as GetTrack returns ISRC)
-func (h *GetTrackV2Handler) fetchParallel(ctx context.Context, spotifyId string) occipital.Track {
+//	t=track → MusicBrainz: ISRC or exact-name match → recording → work
+func (h *GetTrackV2Handler) fetchParallel(ctx context.Context, spotifyId string) (occipital.Track, bool, error) {
 	l := h.log
 	sid := spot.ID(spotifyId)
 
-	// isrcCh carries the ISRC from GetTrack to the MB goroutine.
+	// trackCh carries the selected edition to the MusicBrainz lookup.
 	// Buffered so the Spotify goroutine never blocks.
-	isrcCh := make(chan string, 1)
+	trackCh := make(chan *spot.FullTrack, 1)
 
 	var (
 		mu          sync.Mutex
 		fullTrack   *spot.FullTrack
 		audioFeats  []*spot.AudioFeatures
 		audioAnal   *spot.AudioAnalysis
-		mbRecording *mb.GetRecordingResponse
+		mbRecording *mb.Recording
+		trackErr    error
 		mbWork      *mb.Work
+		workErr     error
 	)
 
 	var wg sync.WaitGroup
@@ -109,20 +136,19 @@ func (h *GetTrackV2Handler) fetchParallel(ctx context.Context, spotifyId string)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		defer close(isrcCh) // always unblock MB goroutine
+		defer close(trackCh) // always unblock MB goroutine
 		t0 := time.Now()
 		ft, err := h.spotifyClient.Client.GetTrack(ctx, sid)
 		if err != nil {
 			l.Warnw("GetTrack failed", "error", err)
+			trackErr = err
 			return
 		}
 		l.Infow("GetTrack", "ms", time.Since(t0).Milliseconds())
 		mu.Lock()
 		fullTrack = ft
 		mu.Unlock()
-		if isrc, ok := ft.ExternalIDs["isrc"]; ok && isrc != "" {
-			isrcCh <- isrc
-		}
+		trackCh <- ft
 	}()
 
 	// --- Spotify: GetAudioFeatures ---
@@ -157,57 +183,31 @@ func (h *GetTrackV2Handler) fetchParallel(ctx context.Context, spotifyId string)
 		mu.Unlock()
 	}()
 
-	// --- MusicBrainz: starts as soon as ISRC arrives ---
+	// MusicBrainz starts as soon as the Spotify track is available.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		isrc, ok := <-isrcCh
-		if !ok || isrc == "" {
+		ft, ok := <-trackCh
+		if !ok || ft == nil {
 			return
 		}
-		t0 := time.Now()
-		searchResp, err := h.musicbrainzClient.Client.SearchRecordingsByISRC(mb.SearchRecordingsByISRCRequest{
-			ISRC: isrc,
-		})
-		if err != nil || searchResp.Count == 0 {
-			l.Warnw("MB ISRC search failed or empty", "isrc", isrc, "error", err)
+		mbCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		rec := h.findRecording(mbCtx, ft)
+		if rec == nil {
 			return
 		}
-		mbid := searchResp.Recordings[0].ID
-		l.Infow("MB ISRC resolved", "mbid", mbid, "ms", time.Since(t0).Milliseconds())
-
-		t1 := time.Now()
-		rec, err := h.musicbrainzClient.Client.GetRecording(mb.GetRecordingRequest{
-			ID: mbid,
-			Includes: []mb.Include{
-				"artist-credits",
-				"artist-rels",
-				"genres",
-				"isrcs",
-				"work-rels",
-				"url-rels",
-			},
-		})
-		if err != nil {
-			l.Warnw("MB GetRecording failed", "mbid", mbid, "error", err)
-			return
-		}
-		l.Infow("MB GetRecording", "mbid", mbid, "ms", time.Since(t1).Milliseconds())
-
-		mu.Lock()
-		mbRecording = &rec
-		mu.Unlock()
-
-		// Work lookup — serial dep on recording, but concurrent with Spotify analysis
-		work := h.getWorkFromRecordingWithLog(rec.Recording)
-		if work != nil {
-			mu.Lock()
-			mbWork = work
-			mu.Unlock()
-		}
+		mbRecording = rec
+		mbWork, workErr = h.getWorkFromRecordingContext(mbCtx, *rec)
 	}()
 
 	wg.Wait()
+	if fullTrack == nil {
+		if trackErr == nil {
+			trackErr = fmt.Errorf("Spotify returned no track")
+		}
+		return occipital.Track{}, false, trackErr
+	}
 
 	// --- Assemble track ---
 	track := occipital.Track{
@@ -219,6 +219,12 @@ func (h *GetTrackV2Handler) fetchParallel(ctx context.Context, spotifyId string)
 		track.Name = fullTrack.Name
 		track.Artist = util.GetFirstArtist(fullTrack.Artists)
 		track.ReleaseDate = fullTrack.Album.ReleaseDate
+		track.Album = &occipital.TrackAlbum{
+			ID: string(fullTrack.Album.ID), Name: fullTrack.Album.Name,
+			ReleaseDate: fullTrack.Album.ReleaseDate, ReleaseDatePrecision: fullTrack.Album.ReleaseDatePrecision,
+			AlbumType: fullTrack.Album.AlbumType, URL: fmt.Sprintf("https://open.spotify.com/album/%s", fullTrack.Album.ID),
+		}
+		track.Meta = &occipital.TrackMeta{DurationMs: int(fullTrack.Duration), Key: -1, Mode: -1}
 		if len(fullTrack.Album.Images) > 0 {
 			track.Image = fullTrack.Album.Images[0].URL
 		}
@@ -231,10 +237,10 @@ func (h *GetTrackV2Handler) fetchParallel(ctx context.Context, spotifyId string)
 		}
 	}
 
-	if len(audioFeats) > 0 && audioFeats[0] != nil {
+	if len(audioFeats) > 0 && audioFeats[0] != nil && audioFeats[0].ID == sid && audioFeats[0].Duration > 0 {
 		af := audioFeats[0]
 		track.Meta = &occipital.TrackMeta{
-			DurationMs:    int(af.Duration),
+			DurationMs:    int(fullTrack.Duration),
 			Key:           int(af.Key),
 			Mode:          int(af.Mode),
 			Tempo:         af.Tempo,
@@ -270,11 +276,13 @@ func (h *GetTrackV2Handler) fetchParallel(ctx context.Context, spotifyId string)
 	}
 
 	if mbRecording != nil {
-		rec := mbRecording.Recording
+		rec := *mbRecording
 		track.ID = rec.ID
 		track.Instruments = getArtistInstrumentsForRecording(rec)
 		track.ProductionCredits = getProductionCreditsForRecording(rec)
 		track.Genres = getGenresForRecording(rec)
+		track.Releases = getRecordingReleases(rec)
+		track.Links = append(track.Links, occipital.ExternalLink{Type: "musicbrainz", URL: "https://musicbrainz.org/recording/" + rec.ID})
 
 		for _, link := range getExternalLinksForRecording(rec) {
 			if link.Type != "spotify" {
@@ -287,7 +295,10 @@ func (h *GetTrackV2Handler) fetchParallel(ctx context.Context, spotifyId string)
 		track.SongCredits = getSongCreditsForWork(*mbWork)
 	}
 
-	return track
+	sanitizeTrackMetadata(&track)
+	// A known work lookup failure is transient. Return the partial track, but
+	// do not store it for the normal seven-day recording cache lifetime.
+	return track, workErr == nil, nil
 }
 
 // --- Cache helpers ---
@@ -296,7 +307,9 @@ func (h *GetTrackV2Handler) getFromCache(ctx context.Context, spotifyId string) 
 	if h.db == nil {
 		return nil, false
 	}
-	doc, err := h.db.Collection(trackCacheCollection).Doc(spotifyId).Get(ctx)
+	cacheCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+	doc, err := h.db.Collection(trackCacheCollection).Doc(spotifyId).Get(cacheCtx)
 	if err != nil {
 		return nil, false
 	}
@@ -304,19 +317,25 @@ func (h *GetTrackV2Handler) getFromCache(ctx context.Context, spotifyId string) 
 	if err := doc.DataTo(&cached); err != nil {
 		return nil, false
 	}
-	if time.Since(cached.CachedAt) > trackCacheTTL {
-		h.log.Infow("Cache expired", "spotify_id", spotifyId)
+	return readCachedTrack(cached)
+}
+
+func readCachedTrack(cached cachedTrackDoc) (*occipital.Track, bool) {
+	if cached.Version != trackCacheVersion || time.Since(cached.CachedAt) > trackCacheTTL || cached.CachedAt.After(time.Now()) {
 		return nil, false
 	}
 	var track occipital.Track
 	if err := json.Unmarshal([]byte(cached.TrackJSON), &track); err != nil {
 		return nil, false
 	}
+	if !cacheableTrack(&track) || (track.ID == "" && time.Since(cached.CachedAt) > time.Hour) {
+		return nil, false
+	}
 	return &track, true
 }
 
 func (h *GetTrackV2Handler) saveToCache(ctx context.Context, spotifyId string, track *occipital.Track) {
-	if h.db == nil {
+	if h.db == nil || !cacheableTrack(track) {
 		return
 	}
 	b, err := json.Marshal(track)
@@ -325,6 +344,7 @@ func (h *GetTrackV2Handler) saveToCache(ctx context.Context, spotifyId string, t
 		return
 	}
 	_, err = h.db.Collection(trackCacheCollection).Doc(spotifyId).Set(ctx, cachedTrackDoc{
+		Version:   trackCacheVersion,
 		TrackJSON: string(b),
 		CachedAt:  time.Now(),
 	})
@@ -335,19 +355,62 @@ func (h *GetTrackV2Handler) saveToCache(ctx context.Context, spotifyId string, t
 	h.log.Infow("Track cached", "spotify_id", spotifyId)
 }
 
-func (h *GetTrackV2Handler) getWorkFromRecordingWithLog(rec mb.Recording) *mb.Work {
+func cacheableTrack(track *occipital.Track) bool {
+	return track != nil && track.SourceID != "" && track.Name != "" && track.Artist != "" && track.Meta != nil && track.Meta.DurationMs > 0
+}
+
+func (h *GetTrackV2Handler) getWorkFromRecordingContext(ctx context.Context, rec mb.Recording) (*mb.Work, error) {
+	if rec.Relations == nil {
+		return nil, nil
+	}
 	for _, relation := range *rec.Relations {
-		if relation.TargetType == "work" {
-			work, err := h.musicbrainzClient.Client.GetWork(mb.GetWorkRequest{
-				ID:       relation.Work.ID,
-				Includes: []mb.Include{"artist-rels", "url-rels"},
-			})
+		if relation.TargetType == "work" && relation.Work != nil && relation.Work.ID != "" {
+			work, err := h.musicbrainzClient.GetWorkContext(ctx, relation.Work.ID)
 			if err != nil {
-				h.log.Errorf("error fetching work: %v", err)
-				return nil
+				h.log.Warnw("MusicBrainz work unavailable", "error", err)
+				return nil, err
 			}
-			return &work.Work
+			if work.ID != relation.Work.ID {
+				return nil, fmt.Errorf("MusicBrainz returned an unexpected work")
+			}
+			return &work, nil
 		}
 	}
-	return nil
+	return nil, nil
+}
+
+// Missing or invalid measurements must not become a musical claim.
+func sanitizeTrackMetadata(track *occipital.Track) {
+	if meta := track.Meta; meta != nil {
+		if meta.DurationMs < 0 || meta.DurationMs > 24*60*60*1000 {
+			meta.DurationMs = 0
+		}
+		if meta.Key < -1 || meta.Key > 11 {
+			meta.Key = -1
+		}
+		if meta.Mode < 0 || meta.Mode > 1 {
+			meta.Mode = -1
+		}
+		if !finiteRange(meta.Tempo, 0, 1000) {
+			meta.Tempo = 0
+		}
+		if meta.TimeSignature < 3 || meta.TimeSignature > 7 {
+			meta.TimeSignature = 0
+		}
+	}
+	if f := track.Features; f != nil {
+		for _, value := range []float32{f.Acousticness, f.Danceability, f.Energy, f.Happiness, f.Instrumentalness, f.Liveness, f.Speechiness} {
+			if !finiteRange(value, 0, 1) {
+				track.Features = nil
+				return
+			}
+		}
+		if !finiteRange(f.Loudness, -100, 20) {
+			track.Features = nil
+		}
+	}
+}
+
+func finiteRange(value, min, max float32) bool {
+	return !math.IsNaN(float64(value)) && !math.IsInf(float64(value), 0) && value >= min && value <= max
 }
