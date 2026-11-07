@@ -50,3 +50,12 @@ make openapi
 
 - Call Spotify with track ID to get the ISRC
 - Call Musicbrainz SearchRecordingsByISRC endpoint to get the recording
+## Private API deployment (November 2026)
+
+Set `BEATBRAIN_API_KEY` in Cloud Run and the trusted frontend server. All paths except `GET /health` require the `X-Beatbrain-Key` header. An unset key rejects data requests. The public health response contains only `{"server":true}`.
+
+The active API serves search, track metadata, creators, recommendations, genres, discovery, and podcasts. The old `/user`, `/profile`, Spotify playback/OAuth, and `/np` routes are removed. The unused featured-tracks handler is also removed. Social profiles and account access remain in the frontend service. No database records are changed.
+
+Occipital no longer opens a PostgreSQL connection or reads `OCCIPITAL_DATABASEURL`, `OCCIPITAL_NEXTAUTHSECRET`, or `OCCIPITAL_SPOTIFYREDIRECTURL`. Existing unused deployment variables can be removed separately. Spotify catalog credentials and Firestore access are still required. Keep `/genre/tracks` for the separate chat app; its server must also send the API key.
+
+Build and check with `go test ./...`, `go vet ./...`, and `CGO_ENABLED=0 go build -mod=readonly .`. After deployment, check health, rejection without a key, search with the key, and HTTP 404 for retired routes with the key. Requests without the key return HTTP 401 even for retired routes.

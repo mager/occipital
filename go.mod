@@ -4,11 +4,8 @@ go 1.24.0
 
 require (
 	cloud.google.com/go/firestore v1.17.0
-	github.com/golang-jwt/jwt/v5 v5.2.2
 	github.com/gorilla/mux v1.8.1
-	github.com/gorilla/websocket v1.5.3
 	github.com/kelseyhightower/envconfig v1.4.0
-	github.com/lib/pq v1.10.9
 	github.com/mager/go-musixmatch v0.0.0-20240928222852-036f3bd702ce
 	github.com/mager/musicbrainz-go v0.0.29
 )
@@ -19,6 +16,7 @@ require (
 	go.uber.org/zap v1.27.0
 	golang.org/x/exp v0.0.0-20240613232115-7f521ea00fb8
 	golang.org/x/oauth2 v0.27.0
+	google.golang.org/api v0.196.0
 )
 
 require (
@@ -48,7 +46,6 @@ require (
 	golang.org/x/sys v0.38.0 // indirect
 	golang.org/x/text v0.31.0 // indirect
 	golang.org/x/time v0.6.0 // indirect
-	google.golang.org/api v0.196.0 // indirect
 	google.golang.org/genproto v0.0.0-20240903143218-8af14fe29dc1 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20240903143218-8af14fe29dc1 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240903143218-8af14fe29dc1 // indirect
