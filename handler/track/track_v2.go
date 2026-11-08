@@ -26,7 +26,7 @@ var spotifyTrackIDPattern = regexp.MustCompile(`^[A-Za-z0-9]{22}$`)
 const (
 	trackCacheCollection = "track_cache_v2"
 	trackCacheTTL        = 7 * 24 * time.Hour
-	trackCacheVersion    = 3
+	trackCacheVersion    = 4
 	trackRequestTimeout  = 8 * time.Second
 )
 

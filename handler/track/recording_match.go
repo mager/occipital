@@ -14,11 +14,32 @@ import (
 
 func normalizedName(s string) string { return strings.ToLower(strings.Join(strings.Fields(s), " ")) }
 
-// Exact names retain edition qualifiers. Never strip "live", "remix", or "remaster".
+// Remove only an explicit, credited guest suffix. Edition qualifiers stay intact.
+func titleWithoutFeaturedArtist(title string, artists []spot.SimpleArtist) string {
+	title = normalizedName(title)
+	for _, artist := range artists[1:] {
+		guest := normalizedName(artist.Name)
+		if guest == "" {
+			continue
+		}
+		for _, prefix := range []string{"feat. ", "ft. ", "featuring "} {
+			suffix := " (" + prefix + guest + ")"
+			if strings.HasSuffix(title, suffix) {
+				base := strings.TrimSuffix(title, suffix)
+				if base != "" {
+					return base
+				}
+			}
+		}
+	}
+	return title
+}
+
+// A title may omit a credited guest only with ISRC, artist, and duration evidence.
 func selectRecording(candidates []musicbrainz.RecordingMatch, ft *spot.FullTrack, byISRC bool) string {
 	selected := ""
 	for _, candidate := range candidates {
-		if candidate.ID == "" || normalizedName(candidate.Title) != normalizedName(ft.Name) || candidate.ArtistCredits == nil {
+		if candidate.ID == "" || candidate.ArtistCredits == nil {
 			continue
 		}
 		artists := map[string]bool{}
@@ -39,8 +60,12 @@ func selectRecording(candidates []musicbrainz.RecordingMatch, ft *spot.FullTrack
 		if !matched {
 			continue
 		}
-		if !byISRC {
-			// Name searches must also supply an unambiguous edition and matching duration.
+		exactTitle := normalizedName(candidate.Title) == normalizedName(ft.Name)
+		if !exactTitle && (!byISRC || titleWithoutFeaturedArtist(candidate.Title, ft.Artists) != titleWithoutFeaturedArtist(ft.Name, ft.Artists)) {
+			continue
+		}
+		if !byISRC || !exactTitle {
+			// Weaker title evidence requires an unambiguous edition and matching duration.
 			delta := candidate.Length - int(ft.Duration)
 			if candidate.Disambiguation != "" || candidate.Length <= 0 || ft.Duration <= 0 || delta < -2000 || delta > 2000 {
 				continue

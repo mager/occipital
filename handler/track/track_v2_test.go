@@ -170,6 +170,7 @@ func TestTrackCacheRejectsStaleSchemaAndEmptyResults(t *testing.T) {
 		{"current", trackCacheVersion, time.Minute, valid, true},
 		{"old schema", 0, time.Minute, valid, false},
 		{"previous partial schema", 2, time.Minute, valid, false},
+		{"previous featured artist mismatch", 3, time.Minute, valid, false},
 		{"expired incomplete", trackCacheVersion, 2 * time.Hour, valid, false},
 		{"empty upstream", trackCacheVersion, time.Minute, `{"source_id":"42UBPzRMh5yyz0EDPr6fr1"}`, false},
 		{"future timestamp", trackCacheVersion, -time.Hour, valid, false},
