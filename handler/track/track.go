@@ -486,7 +486,7 @@ func getProductionCreditsForRecording(rec mb.Recording) []*occipital.TrackProduc
 	}
 	creditMap := make(map[string]map[string]occipital.CreditArtist)
 
-	supportedTypes := []string{"producer", "mix", "recording", "vocal"}
+	supportedTypes := []string{"producer", "mix", "recording", "vocal", "engineer", "mastering", "programming"}
 
 	for _, relation := range *rec.Relations {
 		for _, supportedType := range supportedTypes {
@@ -508,6 +508,12 @@ func getProductionCreditsForRecording(rec mb.Recording) []*occipital.TrackProduc
 		for _, ca := range artistMap {
 			artists = append(artists, ca)
 		}
+		sort.Slice(artists, func(i, j int) bool {
+			if artists[i].Name == artists[j].Name {
+				return artists[i].ID < artists[j].ID
+			}
+			return artists[i].Name < artists[j].Name
+		})
 
 		productionCredits = append(productionCredits, &occipital.TrackProductionCredit{
 			Credit:  creditType,
@@ -517,6 +523,9 @@ func getProductionCreditsForRecording(rec mb.Recording) []*occipital.TrackProduc
 
 	// Sort the production credits by the number of artists (descending)
 	sort.Slice(productionCredits, func(i, j int) bool {
+		if len(productionCredits[i].Artists) == len(productionCredits[j].Artists) {
+			return productionCredits[i].Credit < productionCredits[j].Credit
+		}
 		return len(productionCredits[i].Artists) > len(productionCredits[j].Artists)
 	})
 
