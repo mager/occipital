@@ -139,3 +139,23 @@ func TestYodaReviewedCreditsAndIdentity(t *testing.T) {
 		t.Fatal("existing performance role replaced")
 	}
 }
+
+func TestLimestoneReviewedSongwriters(t *testing.T) {
+	base := occipital.Track{Source: "SPOTIFY", SourceID: "2YT7gnUsicqZhmK3Fkb5L8", ISRC: "QM4DW1568120", Name: "Limestone", Artist: "Magic City Hippies", Meta: &occipital.TrackMeta{DurationMs: 209164}}
+	got := cachedReviewedTrack(t, base)
+	want := []occipital.CreditArtist{{Name: "Robert Joseph Hunter"}, {Name: "Patrick Scott Howard"}, {Name: "Johnn Coughlin"}}
+	if len(got.SongCredits) != 1 || got.SongCredits[0].Credit != "songwriter" || !reflect.DeepEqual(got.SongCredits[0].Artists, want) {
+		t.Fatalf("missing reviewed songwriters: %+v", got.SongCredits)
+	}
+	if len(got.Links) != 1 || got.Links[0].URL != "https://music.apple.com/us/song/limestone/1584203629" {
+		t.Fatal("missing source")
+	}
+	if len(got.ProductionCredits) > 0 || len(got.Instruments) > 0 {
+		t.Fatal("unverified roles added")
+	}
+	base.ISRC = "different"
+	applyReviewedCredits(&base)
+	if len(base.SongCredits) > 0 {
+		t.Fatal("credits applied to another recording")
+	}
+}

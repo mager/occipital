@@ -17,6 +17,16 @@ type reviewedCredits struct {
 func reviewedCreditEntries() []reviewedCredits {
 	return []reviewedCredits{
 		{
+			// Apple Music song page, reviewed 2026-11-09. Same title, artist,
+			// Hippie Castle EP and release date. Only published songwriting
+			// roles are supplied; no performance/production roles are inferred.
+			spotifyID: "2YT7gnUsicqZhmK3Fkb5L8", isrc: "QM4DW1568120", title: "limestone", artist: "magic city hippies", duration: 209164,
+			source: occipital.ExternalLink{Type: "apple_music", URL: "https://music.apple.com/us/song/limestone/1584203629"},
+			songs: []*occipital.TrackSongCredit{
+				{Credit: "songwriter", Artists: []occipital.CreditArtist{{Name: "Robert Joseph Hunter"}, {Name: "Patrick Scott Howard"}, {Name: "Johnn Coughlin"}}},
+			},
+		},
+		{
 			// Official audio description, reviewed 2026-11-09.
 			spotifyID: "7oL7jAZkNyolF1H15Fhlm1", isrc: "ES5022500431", title: "not a pretty girl", artist: "bb trickz", duration: 105080,
 			source: occipital.ExternalLink{Type: "youtube", URL: "https://www.youtube.com/watch?v=xQ6qgGwrFHg"},
