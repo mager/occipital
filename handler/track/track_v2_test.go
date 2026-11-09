@@ -262,3 +262,21 @@ func TestTrackV2StableNoMatchRemainsCacheable(t *testing.T) {
 		t.Fatalf("stable no-match was not cacheable: %+v, %v, %v", result, canCache, err)
 	}
 }
+
+func TestTrackMetadataReportsLookupState(t *testing.T) {
+	for _, tc := range []struct {
+		name, want string
+		status     int
+	}{{"outage", "unavailable", 403}, {"no match", "unmatched", 200}} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := testTrackHandler(t, func(*http.Request) (int, string) { return tc.status, `{"count":0,"recordings":[]}` }, 200)
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, httptest.NewRequest("GET", "/v2/track?spotifyId=42UBPzRMh5yyz0EDPr6fr1", nil))
+			var result struct{ Track map[string]any }
+			json.Unmarshal(w.Body.Bytes(), &result)
+			if result.Track["metadata_status"] != tc.want {
+				t.Fatalf("status=%v want %s", result.Track["metadata_status"], tc.want)
+			}
+		})
+	}
+}

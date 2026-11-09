@@ -26,7 +26,7 @@ var spotifyTrackIDPattern = regexp.MustCompile(`^[A-Za-z0-9]{22}$`)
 const (
 	trackCacheCollection = "track_cache_v2"
 	trackCacheTTL        = 7 * 24 * time.Hour
-	trackCacheVersion    = 5
+	trackCacheVersion    = 6
 	trackRequestTimeout  = 8 * time.Second
 )
 
@@ -296,6 +296,13 @@ func (h *GetTrackV2Handler) fetchParallel(ctx context.Context, spotifyId string)
 		track.SongCredits = getSongCreditsForWork(*mbWork)
 	}
 
+	track.MetadataStatus = "unmatched"
+	if mbRecording != nil {
+		track.MetadataStatus = "matched"
+	}
+	if enrichmentErr != nil {
+		track.MetadataStatus = "unavailable"
+	}
 	sanitizeTrackMetadata(&track)
 	applyReviewedCredits(&track)
 	// A failed metadata lookup must remain retryable. Return the partial track, but

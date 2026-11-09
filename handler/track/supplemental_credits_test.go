@@ -103,3 +103,39 @@ func TestReviewedCreditsSurviveMusicBrainzFailureOnFreshTrack(t *testing.T) {
 		t.Fatalf("credits absent or failed lookup cached: %+v, cache=%v, err=%v", got, canCache, err)
 	}
 }
+
+// Apple Music's credits for the exact 5816 Forest track, reviewed 2026-11-09.
+func TestYodaReviewedCreditsAndIdentity(t *testing.T) {
+	base := func() occipital.Track {
+		return occipital.Track{Source: "SPOTIFY", SourceID: "5EQCcPs2QwFtT45eS1rQps", ISRC: "USZHR2400271", Name: "Yoda", Artist: "Tech N9ne", Meta: &occipital.TrackMeta{DurationMs: 210513}}
+	}
+	got := cachedReviewedTrack(t, base())
+	if len(got.SongCredits) != 1 || got.SongCredits[0].Credit != "songwriter" || len(got.SongCredits[0].Artists) != 3 || len(got.ProductionCredits) != 5 || len(got.Instruments) != 2 {
+		t.Fatalf("Yoda credits missing: %+v", got)
+	}
+	if got.ProductionCredits[0].Artists[0].Name != "JPZ" || got.Instruments[1].Artists[0].Name != "Donnie Yates" {
+		t.Fatal("wrong roles")
+	}
+	if len(got.Links) != 1 || got.Links[0].URL != "https://music.apple.com/us/song/yoda/1813191831" {
+		t.Fatal("missing credit source")
+	}
+	if twice := cachedReviewedTrack(t, *got); !reflect.DeepEqual(twice, got) {
+		t.Fatal("duplicate reviewed credits")
+	}
+	for _, change := range []func(*occipital.Track){
+		func(v *occipital.Track) { v.SourceID = "other" }, func(v *occipital.Track) { v.ISRC = "wrong" }, func(v *occipital.Track) { v.Artist = "Other" }, func(v *occipital.Track) { v.Name = "Yoda (live)" }, func(v *occipital.Track) { v.Meta.DurationMs++ },
+	} {
+		v := base()
+		change(&v)
+		applyReviewedCredits(&v)
+		if len(v.SongCredits)+len(v.ProductionCredits)+len(v.Instruments) > 0 {
+			t.Fatal("credits applied to another edition")
+		}
+	}
+	existing := base()
+	existing.Instruments = []*occipital.TrackInstrumentArtists{{Instrument: "vocals", Artists: []occipital.CreditArtist{{Name: "Existing credit"}}}}
+	applyReviewedCredits(&existing)
+	if existing.Instruments[0].Artists[0].Name != "Existing credit" {
+		t.Fatal("existing performance role replaced")
+	}
+}

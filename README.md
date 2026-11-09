@@ -59,3 +59,9 @@ The active API serves search, track metadata, creators, recommendations, genres,
 Occipital no longer opens a PostgreSQL connection or reads `OCCIPITAL_DATABASEURL`, `OCCIPITAL_NEXTAUTHSECRET`, or `OCCIPITAL_SPOTIFYREDIRECTURL`. Existing unused deployment variables can be removed separately. Spotify catalog credentials and Firestore access are still required. Keep `/genre/tracks` for the separate chat app; its server must also send the API key.
 
 Build and check with `go test ./...`, `go vet ./...`, and `CGO_ENABLED=0 go build -mod=readonly .`. After deployment, check health, rejection without a key, search with the key, and HTTP 404 for retired routes with the key. Requests without the key return HTTP 401 even for retired routes.
+
+### Credit lookup states
+
+The v2 track response includes `metadata_status`: `matched`, `unmatched`, or `unavailable`. An upstream connection or work lookup failure is `unavailable` and must not be cached as a completed lookup. A recording match does not guarantee that MusicBrainz contains detailed credits.
+
+`handler/track/supplemental_credits.go` contains separately reviewed credits for exact Spotify editions. Each entry has a source URL, review date, ISRC, title, primary artist, and duration. It fills missing roles only and preserves existing populated roles. The Yoda entry was verified against Apple Music on 2026-11-09. This data does not resolve the observed Cloud Run → MusicBrainz TLS connection failures; that service availability issue remains separate.

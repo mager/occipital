@@ -22,6 +22,8 @@ type Track struct {
 	Instruments       []*TrackInstrumentArtists `json:"instruments"`
 	ProductionCredits []*TrackProductionCredit  `json:"production_credits"`
 	SongCredits       []*TrackSongCredit        `json:"song_credits"`
+	// MetadataStatus distinguishes a failed lookup from a confirmed missing match.
+	MetadataStatus string `json:"metadata_status,omitempty"`
 
 	Rank       int `json:"rank,omitempty"`
 	Popularity int `json:"popularity,omitempty"`
