@@ -297,6 +297,7 @@ func (h *GetTrackV2Handler) fetchParallel(ctx context.Context, spotifyId string)
 	}
 
 	sanitizeTrackMetadata(&track)
+	applyReviewedCredits(&track)
 	// A failed metadata lookup must remain retryable. Return the partial track, but
 	// do not store it for the normal seven-day recording cache lifetime.
 	return track, enrichmentErr == nil, nil
@@ -332,6 +333,7 @@ func readCachedTrack(cached cachedTrackDoc) (*occipital.Track, bool) {
 	if !cacheableTrack(&track) || (track.ID == "" && time.Since(cached.CachedAt) > time.Hour) {
 		return nil, false
 	}
+	applyReviewedCredits(&track)
 	return &track, true
 }
 
