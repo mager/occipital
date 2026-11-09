@@ -160,10 +160,84 @@ func (c *MusicbrainzClient) SearchRecordingsContext(ctx context.Context, query s
 	return result, err
 }
 
-func (c *MusicbrainzClient) GetRecordingContext(ctx context.Context, id string) (mb.Recording, error) {
-	var result mb.Recording
-	err := c.getContext(ctx, "recording/"+url.PathEscape(id), url.Values{"inc": {"artist-credits+artist-rels+genres+isrcs+releases+work-rels+url-rels"}}, &result)
+// RecordingDetails keeps nested work credits that the older shared SDK drops.
+// Requesting work-level-rels removes a separate network call for songwriting.
+type RecordingDetails struct {
+	mb.Recording
+	Length int                `json:"length"`
+	Video  bool               `json:"video"`
+	Works  map[string]mb.Work `json:"-"`
+}
+
+func (r *RecordingDetails) UnmarshalJSON(data []byte) error {
+	type plain RecordingDetails
+	var result plain
+	if err := json.Unmarshal(data, &result); err != nil {
+		return err
+	}
+	var nested struct {
+		Relations []struct {
+			TargetType string   `json:"target-type"`
+			Work       *mb.Work `json:"work"`
+		} `json:"relations"`
+	}
+	if err := json.Unmarshal(data, &nested); err != nil {
+		return err
+	}
+	result.Works = make(map[string]mb.Work)
+	for _, relation := range nested.Relations {
+		if relation.TargetType == "work" && relation.Work != nil && relation.Work.ID != "" && relation.Work.Relations != nil {
+			result.Works[relation.Work.ID] = *relation.Work
+		}
+	}
+	*r = RecordingDetails(result)
+	return nil
+}
+
+func (c *MusicbrainzClient) GetRecordingContext(ctx context.Context, id string) (RecordingDetails, error) {
+	var result RecordingDetails
+	err := c.getContext(ctx, "recording/"+url.PathEscape(id), url.Values{"inc": {"artist-credits+artist-rels+genres+isrcs+releases+work-rels+work-level-rels+url-rels"}}, &result)
 	return result, err
+}
+
+// LookupRecordingsByURL uses MusicBrainz's explicit link to this Spotify track,
+// not a title search. A missing URL is different from a failed lookup.
+func (c *MusicbrainzClient) LookupRecordingsByURL(ctx context.Context, resource string) ([]string, bool, error) {
+	var result struct {
+		Resource  string `json:"resource"`
+		Relations []struct {
+			TargetType string `json:"target-type"`
+			Type       string `json:"type"`
+			Direction  string `json:"direction"`
+			Ended      bool   `json:"ended"`
+			Recording  struct {
+				ID    string `json:"id"`
+				Video bool   `json:"video"`
+			} `json:"recording"`
+		} `json:"relations"`
+	}
+	err := c.getContext(ctx, "url", url.Values{"resource": {resource}, "inc": {"recording-rels"}}, &result)
+	if err != nil {
+		var status *recordingStatusError
+		if errors.As(err, &status) && status.status == http.StatusNotFound {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	if result.Resource != resource {
+		return nil, true, fmt.Errorf("MusicBrainz returned an unexpected URL")
+	}
+	ids := []string{}
+	seen := map[string]bool{}
+	for _, relation := range result.Relations {
+		id := relation.Recording.ID
+		if relation.TargetType == "recording" && relation.Direction == "backward" &&
+			(relation.Type == "free streaming" || relation.Type == "streaming") && !relation.Ended && !relation.Recording.Video && id != "" && !seen[id] {
+			ids = append(ids, id)
+			seen[id] = true
+		}
+	}
+	return ids, true, nil
 }
 
 func (c *MusicbrainzClient) GetWorkContext(ctx context.Context, id string) (mb.Work, error) {

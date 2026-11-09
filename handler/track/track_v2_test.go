@@ -29,7 +29,9 @@ func testTrackHandler(t *testing.T, mbResponse func(*http.Request) (int, string)
 		if strings.Contains(r.URL.Host, "spotify") && strings.Contains(r.URL.Path, "/tracks/") {
 			status, body = spotifyStatus, `{"id":"42UBPzRMh5yyz0EDPr6fr1","name":"Manchild","duration_ms":213000,"artists":[{"name":"Sabrina Carpenter"}],"external_ids":{"isrc":"USUM72504441"},"album":{"id":"album-id","name":"Man's Best Friend","release_date":"2025-08-29","release_date_precision":"day","album_type":"album","total_tracks":12,"images":[{"url":"https://example.com/art.jpg"}]}}`
 		}
-		if strings.Contains(r.URL.Host, "musicbrainz") && mbResponse != nil {
+		if strings.Contains(r.URL.Host, "musicbrainz") && r.URL.Path == "/ws/2/url" {
+			status, body = 404, `{}`
+		} else if strings.Contains(r.URL.Host, "musicbrainz") && mbResponse != nil {
 			status, body = mbResponse(r)
 		}
 		return &http.Response{StatusCode: status, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil

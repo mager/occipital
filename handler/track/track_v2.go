@@ -26,7 +26,7 @@ var spotifyTrackIDPattern = regexp.MustCompile(`^[A-Za-z0-9]{22}$`)
 const (
 	trackCacheCollection = "track_cache_v2"
 	trackCacheTTL        = 7 * 24 * time.Hour
-	trackCacheVersion    = 6
+	trackCacheVersion    = 7
 	trackRequestTimeout  = 8 * time.Second
 )
 
@@ -191,15 +191,15 @@ func (h *GetTrackV2Handler) fetchParallel(ctx context.Context, spotifyId string)
 		if !ok || ft == nil {
 			return
 		}
-		mbCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		mbCtx, cancel := context.WithTimeout(ctx, 7*time.Second)
 		defer cancel()
 		rec, err := h.findRecording(mbCtx, ft)
 		enrichmentErr = err
 		if rec == nil {
 			return
 		}
-		mbRecording = rec
-		mbWork, enrichmentErr = h.getWorkFromRecordingContext(mbCtx, *rec)
+		mbRecording = &rec.Recording
+		mbWork, enrichmentErr = h.getWorkFromDetails(mbCtx, *rec)
 	}()
 
 	wg.Wait()
@@ -367,6 +367,20 @@ func (h *GetTrackV2Handler) saveToCache(ctx context.Context, spotifyId string, t
 
 func cacheableTrack(track *occipital.Track) bool {
 	return track != nil && track.SourceID != "" && track.Name != "" && track.Artist != "" && track.Meta != nil && track.Meta.DurationMs > 0
+}
+
+func (h *GetTrackV2Handler) getWorkFromDetails(ctx context.Context, rec musicbrainz.RecordingDetails) (*mb.Work, error) {
+	if rec.Relations != nil {
+		for _, relation := range *rec.Relations {
+			if relation.TargetType == "work" && relation.Work != nil && relation.Work.ID != "" {
+				if work, ok := rec.Works[relation.Work.ID]; ok {
+					return &work, nil
+				}
+				break
+			}
+		}
+	}
+	return h.getWorkFromRecordingContext(ctx, rec.Recording)
 }
 
 func (h *GetTrackV2Handler) getWorkFromRecordingContext(ctx context.Context, rec mb.Recording) (*mb.Work, error) {

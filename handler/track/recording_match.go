@@ -3,6 +3,7 @@ package track
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -83,7 +84,64 @@ func quoteSearch(s string) string {
 	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) + `"`
 }
 
-func (h *GetTrackV2Handler) findRecording(ctx context.Context, ft *spot.FullTrack) (*mb.Recording, error) {
+// MusicBrainz keeps remasters on the original recording. Only remove an
+// explicit mastering suffix; retain live, remix, edit, mono, and other versions.
+var remasterSuffix = regexp.MustCompile(`(?i)(?: - (?:[0-9]{4} )?remaster(?:ed)?(?: [0-9]{4})?| \((?:[0-9]{4} )?remaster(?:ed)?(?: [0-9]{4})?\))$`)
+
+func recordingTitle(s string) string { return remasterSuffix.ReplaceAllString(normalizedName(s), "") }
+
+func linkedRecordingMatches(rec musicbrainz.RecordingDetails, ft *spot.FullTrack) bool {
+	title := func(value string) string {
+		value = recordingTitle(value)
+		if len(ft.Artists) > 0 {
+			value = titleWithoutFeaturedArtist(value, ft.Artists)
+		}
+		return value
+	}
+	if rec.Video || title(rec.Title) != title(ft.Name) || rec.Length <= 0 || ft.Duration <= 0 {
+		return false
+	}
+	delta := rec.Length - int(ft.Duration)
+	if delta < -2000 || delta > 2000 {
+		return false
+	}
+	if isrc := ft.ExternalIDs["isrc"]; isrc != "" && rec.ISRCs != nil && len(*rec.ISRCs) > 0 {
+		for _, candidate := range *rec.ISRCs {
+			if strings.EqualFold(candidate, isrc) {
+				return true
+			}
+		}
+		return false
+	}
+	return true
+}
+
+func (h *GetTrackV2Handler) findRecording(ctx context.Context, ft *spot.FullTrack) (*musicbrainz.RecordingDetails, error) {
+	if ft.ID != "" {
+		ids, found, err := h.musicbrainzClient.LookupRecordingsByURL(ctx, "https://open.spotify.com/track/"+string(ft.ID))
+		if err != nil {
+			h.log.Warnw("MusicBrainz Spotify link unavailable", "error", err)
+			return nil, err
+		}
+		if found {
+			// Do not select the first recording from a conflicting explicit link.
+			if len(ids) != 1 {
+				return nil, nil
+			}
+			rec, err := h.musicbrainzClient.GetRecordingContext(ctx, ids[0])
+			if err != nil {
+				return nil, err
+			}
+			if rec.ID != ids[0] {
+				return nil, fmt.Errorf("MusicBrainz returned an unexpected recording")
+			}
+			if !linkedRecordingMatches(rec, ft) {
+				return nil, nil
+			}
+			return &rec, nil
+		}
+	}
+
 	id := ""
 	if isrc := ft.ExternalIDs["isrc"]; isrc != "" {
 		result, err := h.musicbrainzClient.SearchRecordingsContext(ctx, "isrc:"+quoteSearch(isrc))
