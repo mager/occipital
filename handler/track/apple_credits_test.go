@@ -172,3 +172,57 @@ func TestLinkedWorkRejectsWrongIdentity(t *testing.T) {
 		t.Fatal("wrong work identity accepted")
 	}
 }
+
+func TestSingleCreditsAgreeAcrossAlbumEditions(t *testing.T) {
+	ft := appleTestTrack()
+	ft.Name = "End of the World"
+	ft.Duration = 250483
+	ft.Artists = []spot.SimpleArtist{{Name: "Miley Cyrus"}}
+	ft.Album.Name = ft.Name
+	ft.Album.AlbumType = "single"
+	search := `{"results":[{"trackId":1804974563,"trackName":"End of the World","artistName":"Miley Cyrus","collectionName":"Something Beautiful","trackTimeMillis":250484,"trackExplicitness":"notExplicit"},{"trackId":1839063067,"trackName":"End of the World","artistName":"Miley Cyrus","collectionName":"Something Beautiful (Deluxe)","trackTimeMillis":250484,"trackExplicitness":"notExplicit"}]}`
+	for _, conflict := range []bool{false, true} {
+		c := &appleCreditClient{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			body := search
+			if r.URL.Host == "music.apple.com" {
+				file := "testdata/apple-miley-standard.html"
+				if strings.HasSuffix(r.URL.Path, "1839063067") {
+					file = "testdata/apple-miley-deluxe.html"
+				}
+				b, _ := os.ReadFile(file)
+				body = string(b)
+				if conflict && strings.HasSuffix(r.URL.Path, "1839063067") {
+					body = strings.ReplaceAll(body, "Michael Pollack", "Someone Else")
+				}
+			}
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}, Request: r}, nil
+		})}}
+		got, err := c.lookup(context.Background(), ft)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !conflict && (got == nil || len(got.songs) == 0 || len(got.production) == 0) {
+			t.Fatal("same single credits lost across album editions")
+		}
+		if conflict && got != nil {
+			t.Fatal("conflicting album credits accepted")
+		}
+	}
+}
+
+func TestMileyLiveCredits(t *testing.T) {
+	if os.Getenv("BEATBRAIN_LIVE_METADATA_TEST") != "1" {
+		t.Skip("explicit live source check")
+	}
+	ft := appleTestTrack()
+	ft.Name = "End of the World"
+	ft.Duration = 250483
+	ft.Artists = []spot.SimpleArtist{{Name: "Miley Cyrus"}}
+	ft.Album.Name = ft.Name
+	ft.Album.AlbumType = "single"
+	got, err := newAppleCreditClient().lookup(context.Background(), ft)
+	if err != nil || got == nil || len(got.songs) == 0 || len(got.production) == 0 {
+		t.Fatalf("missing single credits: %+v %v", got, err)
+	}
+	t.Logf("Source %s: %d songwriting roles, %d production roles", got.source.URL, len(got.songs), len(got.production))
+}

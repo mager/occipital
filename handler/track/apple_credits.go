@@ -106,8 +106,11 @@ func (c *appleCreditClient) lookup(ctx context.Context, track *spot.FullTrack) (
 		return nil, err
 	}
 	match, err := selectAppleTrack(body, track)
-	if err != nil || match == nil {
+	if err != nil {
 		return nil, err
+	}
+	if match == nil {
+		return c.lookupSingleAcrossAlbums(ctx, body, track)
 	}
 	page, err := c.get(ctx, "https://music.apple.com/us/song/"+strconv.FormatInt(match.ID, 10))
 	if err != nil {
@@ -242,7 +245,7 @@ func parseAppleCredits(body []byte, match appleCatalogTrack, track *spot.FullTra
 			artists = append(artists, normalizedName(artist.Title))
 		}
 		sort.Strings(artists)
-		verified = header.Descriptor.Identifiers.ID == id && normalizedName(header.Title) == normalizedName(track.Name) && albumKey(header.Album) == albumKey(track.Album.Name) && strings.Join(artists, "\x00") == strings.Join(expected, "\x00")
+		verified = header.Descriptor.Identifiers.ID == id && normalizedName(header.Title) == normalizedName(track.Name) && albumKey(header.Album) == albumKey(match.Album) && strings.Join(artists, "\x00") == strings.Join(expected, "\x00")
 	}
 	if !verified {
 		return nil, fmt.Errorf("credits page identity mismatch")
@@ -327,4 +330,91 @@ func appendPerformanceArtist(rows []*occipital.TrackInstrumentArtists, role stri
 		}
 	}
 	return append(rows, &occipital.TrackInstrumentArtists{Instrument: role, Artists: []occipital.CreditArtist{artist}})
+}
+
+// A single can leave the catalog after its album arrives. Accept that case only
+// when two distinct album editions independently expose identical named credits.
+// Never relax title, all-artists, duration, rating, or page identity checks.
+func (c *appleCreditClient) lookupSingleAcrossAlbums(ctx context.Context, body []byte, track *spot.FullTrack) (*reviewedCredits, error) {
+	if track.Album.AlbumType != "single" || albumKey(track.Album.Name) != normalizedName(track.Name) {
+		return nil, nil
+	}
+	var catalog struct {
+		Results []appleCatalogTrack `json:"results"`
+	}
+	if json.Unmarshal(body, &catalog) != nil {
+		return nil, fmt.Errorf("invalid catalog response")
+	}
+	candidates := []appleCatalogTrack{}
+	seen := map[int64]bool{}
+	for _, item := range catalog.Results {
+		if seen[item.ID] {
+			continue
+		}
+		seen[item.ID] = true
+		// An ambiguous exact-album result must not be replaced by weaker evidence.
+		probe := *track
+		probe.Album = track.Album
+		probe.Album.Name = item.Album
+		candidateJSON, _ := json.Marshal(struct {
+			Results []appleCatalogTrack `json:"results"`
+		}{[]appleCatalogTrack{item}})
+		match, err := selectAppleTrack(candidateJSON, &probe)
+		if err != nil {
+			return nil, err
+		}
+		if match == nil {
+			continue
+		}
+		if albumKey(item.Album) == albumKey(track.Album.Name) {
+			return nil, nil
+		}
+		candidates = append(candidates, *match)
+	}
+	if len(candidates) != 2 || albumKey(candidates[0].Album) == albumKey(candidates[1].Album) {
+		return nil, nil
+	}
+	var result *reviewedCredits
+	signature := ""
+	for _, match := range candidates {
+		page, err := c.get(ctx, "https://music.apple.com/us/song/"+strconv.FormatInt(match.ID, 10))
+		if err != nil {
+			return nil, err
+		}
+		credits, err := parseAppleCredits(page, match, track)
+		if err != nil {
+			return nil, err
+		}
+		current := creditSignature(credits)
+		if current == "" {
+			return nil, nil
+		}
+		if result == nil {
+			result = credits
+			signature = current
+		} else if current != signature {
+			return nil, nil
+		}
+	}
+	return result, nil
+}
+func creditSignature(credits *reviewedCredits) string {
+	rows := []string{}
+	for _, row := range credits.songs {
+		for _, artist := range row.Artists {
+			rows = append(rows, "song:"+row.Credit+":"+artist.Name)
+		}
+	}
+	for _, row := range credits.production {
+		for _, artist := range row.Artists {
+			rows = append(rows, "production:"+row.Credit+":"+artist.Name)
+		}
+	}
+	for _, row := range credits.performance {
+		for _, artist := range row.Artists {
+			rows = append(rows, "performance:"+row.Instrument+":"+artist.Name)
+		}
+	}
+	sort.Strings(rows)
+	return strings.Join(rows, "\x00")
 }

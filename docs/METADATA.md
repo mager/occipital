@@ -18,7 +18,7 @@ Use direct Spotify links, recording identifiers and conservative catalog matchin
 
 ## Apple Music public credits
 
-An iTunes catalog search must match title, all artists, album, duration within one second, and explicit rating. Ambiguous results are rejected. The public song page must agree on ID, title, album and artists. Only visible named writing, performance and production sections are retained, with a canonical source link. This is a public-page parser, not a documented credits API; schema changes are failures that remain retryable. No lyrics, account tokens or listening data are collected.
+An iTunes catalog search must match title, all artists, album, duration within one second, and explicit rating. Ambiguous results are rejected. If a same-name single has left the catalog, exactly two different album editions can supply credits only when their title, all artists, duration and rating match and every named credit is identical. The page identity is checked against each catalog album. The public song page must agree on ID, title, album and artists. Only visible named writing, performance and production sections are retained, with a canonical source link. This is a public-page parser, not a documented credits API; schema changes are failures that remain retryable. No lyrics, account tokens or listening data are collected.
 
 Requests use timeouts, cancellation, limited response sizes and a per-instance search pace of 20/minute. Verified source gaps retry after one hour; successful catalog results cache for seven days. Provider failures do not get that normal cache lifetime.
 

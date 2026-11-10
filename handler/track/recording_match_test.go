@@ -58,3 +58,17 @@ func TestRecordingMatchesVerifiedFeaturedArtist(t *testing.T) {
 		})
 	}
 }
+
+func TestRecordingUsesCreditedArtistName(t *testing.T) {
+	var ft spot.FullTrack
+	json.Unmarshal([]byte(`{"name":"End of the World","duration_ms":250483,"artists":[{"name":"Miley Cyrus"}]}`), &ft)
+	var rec musicbrainz.RecordingMatch
+	json.Unmarshal([]byte(`{"id":"recording","title":"End of the World","length":250483,"artist-credit":[{"name":"Miley Cyrus","artist":{"name":"MILEY"}}]}`), &rec)
+	if got := selectRecording([]musicbrainz.RecordingMatch{rec}, &ft, true); got != "recording" {
+		t.Fatal("credited artist name lost")
+	}
+	ft.Artists[0].Name = "MILEY"
+	if got := selectRecording([]musicbrainz.RecordingMatch{rec}, &ft, true); got != "recording" {
+		t.Fatal("canonical artist name lost")
+	}
+}

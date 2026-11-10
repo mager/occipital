@@ -43,19 +43,27 @@ func selectRecording(candidates []musicbrainz.RecordingMatch, ft *spot.FullTrack
 		if candidate.ID == "" || candidate.ArtistCredits == nil {
 			continue
 		}
-		artists := map[string]bool{}
-		for _, credit := range *candidate.ArtistCredits {
-			if credit.Artist != nil {
-				artists[normalizedName(credit.Artist.Name)] = true
-			}
-		}
-		if len(ft.Artists) == 0 || len(artists) != len(ft.Artists) {
+		credits := *candidate.ArtistCredits
+		if len(ft.Artists) == 0 || len(credits) != len(ft.Artists) {
 			continue
 		}
+		used := make([]bool, len(credits))
 		matched := true
 		for _, artist := range ft.Artists {
-			if !artists[normalizedName(artist.Name)] {
+			found := false
+			for index, credit := range credits {
+				if used[index] || credit.Artist == nil {
+					continue
+				}
+				name := normalizedName(artist.Name)
+				if name != "" && (name == normalizedName(credit.Name) || name == normalizedName(credit.Artist.Name)) {
+					used[index], found = true, true
+					break
+				}
+			}
+			if !found {
 				matched = false
+				break
 			}
 		}
 		if !matched {
