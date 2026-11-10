@@ -14,6 +14,7 @@ import (
 )
 
 type SpotifyClient struct {
+	HTTP        *http.Client
 	ID          string
 	Secret      string
 	Client      *spotify.Client
@@ -48,6 +49,7 @@ func ProvideSpotify(cfg config.Config) *SpotifyClient {
 	httpClient.Timeout = 10 * time.Second
 	client := spotify.New(httpClient)
 
+	c.HTTP = httpClient
 	c.Client = client
 	c.TokenSource = tokenSource
 

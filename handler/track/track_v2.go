@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"os"
 	"regexp"
 	"sync"
 	"time"
@@ -26,7 +27,7 @@ var spotifyTrackIDPattern = regexp.MustCompile(`^[A-Za-z0-9]{22}$`)
 const (
 	trackCacheCollection = "track_cache_v2"
 	trackCacheTTL        = 7 * 24 * time.Hour
-	trackCacheVersion    = 7
+	trackCacheVersion    = 8
 	trackRequestTimeout  = 8 * time.Second
 )
 
@@ -38,6 +39,8 @@ type cachedTrackDoc struct {
 
 // GetTrackV2Handler is a fast, parallel, cached track handler.
 type GetTrackV2Handler struct {
+	apple             *appleCreditClient
+	audioEnabled      bool
 	log               *zap.SugaredLogger
 	spotifyClient     *spotify.SpotifyClient
 	musicbrainzClient *musicbrainz.MusicbrainzClient
@@ -55,6 +58,8 @@ func NewGetTrackV2Handler(
 	db *firestore.Client,
 ) *GetTrackV2Handler {
 	return &GetTrackV2Handler{
+		apple:             newAppleCreditClient(),
+		audioEnabled:      os.Getenv("OCCIPITAL_SPOTIFY_AUDIO_ENABLED") == "true",
 		log:               log,
 		spotifyClient:     spotifyClient,
 		musicbrainzClient: musicbrainzClient,
@@ -112,88 +117,28 @@ func (h *GetTrackV2Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 //	t=0 → Spotify: GetTrack, GetAudioFeatures, GetAudioAnalysis (all concurrent)
 //	t=track → MusicBrainz: ISRC or exact-name match → recording → work
 func (h *GetTrackV2Handler) fetchParallel(ctx context.Context, spotifyId string) (occipital.Track, bool, error) {
-	l := h.log
 	sid := spot.ID(spotifyId)
-
-	// trackCh carries the selected edition to the MusicBrainz lookup.
-	// Buffered so the Spotify goroutine never blocks.
-	trackCh := make(chan *spot.FullTrack, 1)
-
-	var (
-		mu            sync.Mutex
-		fullTrack     *spot.FullTrack
-		audioFeats    []*spot.AudioFeatures
-		audioAnal     *spot.AudioAnalysis
-		mbRecording   *mb.Recording
-		trackErr      error
-		mbWork        *mb.Work
-		enrichmentErr error
-	)
-
+	fullTrack, err := h.spotifyClient.Client.GetTrack(ctx, sid)
+	if err != nil {
+		return occipital.Track{}, false, err
+	}
+	if fullTrack == nil {
+		return occipital.Track{}, false, fmt.Errorf("Spotify returned no track")
+	}
+	var audioFeats []*spot.AudioFeatures
+	var audioAnal *spot.AudioAnalysis
+	var mbRecording *mb.Recording
+	var mbWork *mb.Work
+	var enrichmentErr, appleErr error
+	var appleData *reviewedCredits
+	var album *spotify.CatalogAlbum
 	var wg sync.WaitGroup
-
-	// --- Spotify: GetTrack ---
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		defer close(trackCh) // always unblock MB goroutine
-		t0 := time.Now()
-		ft, err := h.spotifyClient.Client.GetTrack(ctx, sid)
-		if err != nil {
-			l.Warnw("GetTrack failed", "error", err)
-			trackErr = err
-			return
-		}
-		l.Infow("GetTrack", "ms", time.Since(t0).Milliseconds())
-		mu.Lock()
-		fullTrack = ft
-		mu.Unlock()
-		trackCh <- ft
-	}()
-
-	// --- Spotify: GetAudioFeatures ---
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		t0 := time.Now()
-		f, err := h.spotifyClient.Client.GetAudioFeatures(ctx, sid)
-		if err != nil {
-			l.Warnw("GetAudioFeatures failed", "error", err)
-			return
-		}
-		l.Infow("GetAudioFeatures", "ms", time.Since(t0).Milliseconds())
-		mu.Lock()
-		audioFeats = f
-		mu.Unlock()
-	}()
-
-	// --- Spotify: GetAudioAnalysis ---
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		t0 := time.Now()
-		a, err := h.spotifyClient.Client.GetAudioAnalysis(ctx, sid)
-		if err != nil {
-			l.Warnw("GetAudioAnalysis failed", "error", err)
-			return
-		}
-		l.Infow("GetAudioAnalysis", "ms", time.Since(t0).Milliseconds())
-		mu.Lock()
-		audioAnal = a
-		mu.Unlock()
-	}()
-
-	// MusicBrainz starts as soon as the Spotify track is available.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		ft, ok := <-trackCh
-		if !ok || ft == nil {
-			return
-		}
-		mbCtx, cancel := context.WithTimeout(ctx, 7*time.Second)
+		mbCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
 		defer cancel()
-		rec, err := h.findRecording(mbCtx, ft)
+		rec, err := h.findRecording(mbCtx, fullTrack)
 		enrichmentErr = err
 		if rec == nil {
 			return
@@ -201,14 +146,33 @@ func (h *GetTrackV2Handler) fetchParallel(ctx context.Context, spotifyId string)
 		mbRecording = &rec.Recording
 		mbWork, enrichmentErr = h.getWorkFromDetails(mbCtx, *rec)
 	}()
-
-	wg.Wait()
-	if fullTrack == nil {
-		if trackErr == nil {
-			trackErr = fmt.Errorf("Spotify returned no track")
-		}
-		return occipital.Track{}, false, trackErr
+	if h.apple != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			appleCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
+			defer cancel()
+			appleData, appleErr = h.apple.lookup(appleCtx, fullTrack)
+			if appleErr != nil {
+				h.log.Warnw("Apple credits unavailable", "spotify_id", spotifyId, "error", appleErr)
+			}
+		}()
 	}
+	if h.spotifyClient.HTTP != nil && fullTrack.Album.ID != "" {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			albumCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			defer cancel()
+			album, _ = h.spotifyClient.GetCatalogAlbum(albumCtx, string(fullTrack.Album.ID))
+		}()
+	}
+	if h.audioEnabled {
+		wg.Add(2)
+		go func() { defer wg.Done(); audioFeats, _ = h.spotifyClient.Client.GetAudioFeatures(ctx, sid) }()
+		go func() { defer wg.Done(); audioAnal, _ = h.spotifyClient.Client.GetAudioAnalysis(ctx, sid) }()
+	}
+	wg.Wait()
 
 	// --- Assemble track ---
 	track := occipital.Track{
@@ -219,11 +183,26 @@ func (h *GetTrackV2Handler) fetchParallel(ctx context.Context, spotifyId string)
 	if fullTrack != nil {
 		track.Name = fullTrack.Name
 		track.Artist = util.GetFirstArtist(fullTrack.Artists)
+		for _, artist := range fullTrack.Artists {
+			track.Artists = append(track.Artists, occipital.TrackArtist{ID: string(artist.ID), Name: artist.Name, URL: "https://open.spotify.com/artist/" + string(artist.ID)})
+		}
+		track.Explicit = fullTrack.Explicit
+		track.TrackNumber = int(fullTrack.TrackNumber)
+		track.DiscNumber = int(fullTrack.DiscNumber)
 		track.ReleaseDate = fullTrack.Album.ReleaseDate
 		track.Album = &occipital.TrackAlbum{
 			ID: string(fullTrack.Album.ID), Name: fullTrack.Album.Name,
 			ReleaseDate: fullTrack.Album.ReleaseDate, ReleaseDatePrecision: fullTrack.Album.ReleaseDatePrecision,
 			AlbumType: fullTrack.Album.AlbumType, URL: fmt.Sprintf("https://open.spotify.com/album/%s", fullTrack.Album.ID),
+		}
+		if album != nil {
+			track.Album.Label = album.Label
+			track.Album.TotalTracks = album.TotalTracks
+			for _, copyright := range album.Copyrights {
+				if copyright.Text != "" {
+					track.Album.Copyrights = append(track.Album.Copyrights, copyright.Text)
+				}
+			}
 		}
 		track.Meta = &occipital.TrackMeta{DurationMs: int(fullTrack.Duration), Key: -1, Mode: -1}
 		if len(fullTrack.Album.Images) > 0 {
@@ -304,10 +283,20 @@ func (h *GetTrackV2Handler) fetchParallel(ctx context.Context, spotifyId string)
 		track.MetadataStatus = "unavailable"
 	}
 	sanitizeTrackMetadata(&track)
+	if appleData != nil {
+		mergeReviewedCredits(&track, *appleData)
+	}
 	applyReviewedCredits(&track)
+	track.CreditsStatus = "missing"
+	hasCredits := len(track.SongCredits)+len(track.ProductionCredits)+len(track.Instruments) > 0
+	if hasCredits {
+		track.CreditsStatus = "available"
+	} else if enrichmentErr != nil || appleErr != nil {
+		track.CreditsStatus = "unavailable"
+	}
 	// A failed metadata lookup must remain retryable. Return the partial track, but
 	// do not store it for the normal seven-day recording cache lifetime.
-	return track, enrichmentErr == nil, nil
+	return track, enrichmentErr == nil && appleErr == nil, nil
 }
 
 // --- Cache helpers ---
@@ -337,7 +326,7 @@ func readCachedTrack(cached cachedTrackDoc) (*occipital.Track, bool) {
 	if err := json.Unmarshal([]byte(cached.TrackJSON), &track); err != nil {
 		return nil, false
 	}
-	if !cacheableTrack(&track) || (track.ID == "" && time.Since(cached.CachedAt) > time.Hour) {
+	if !cacheableTrack(&track) || ((track.ID == "" || track.CreditsStatus == "missing") && time.Since(cached.CachedAt) > time.Hour) {
 		return nil, false
 	}
 	applyReviewedCredits(&track)
@@ -370,17 +359,45 @@ func cacheableTrack(track *occipital.Track) bool {
 }
 
 func (h *GetTrackV2Handler) getWorkFromDetails(ctx context.Context, rec musicbrainz.RecordingDetails) (*mb.Work, error) {
-	if rec.Relations != nil {
-		for _, relation := range *rec.Relations {
-			if relation.TargetType == "work" && relation.Work != nil && relation.Work.ID != "" {
-				if work, ok := rec.Works[relation.Work.ID]; ok {
-					return &work, nil
-				}
-				break
+	if rec.Relations == nil {
+		return nil, nil
+	}
+	relations := []mb.Relation{}
+	seen := map[string]bool{}
+	lookups := 0
+	var lookupErr error
+	for _, relation := range *rec.Relations {
+		if relation.TargetType != "work" || relation.Work == nil || relation.Work.ID == "" || seen[relation.Work.ID] {
+			continue
+		}
+		id := relation.Work.ID
+		seen[id] = true
+		work, ok := rec.Works[id]
+		if !ok {
+			if lookups >= 3 {
+				lookupErr = fmt.Errorf("work lookup budget exceeded")
+				continue
+			}
+			lookups++
+			var err error
+			work, err = h.musicbrainzClient.GetWorkContext(ctx, id)
+			if err != nil {
+				lookupErr = err
+				continue
 			}
 		}
+		if work.ID != id {
+			lookupErr = fmt.Errorf("MusicBrainz returned an unexpected work")
+			continue
+		}
+		if work.Relations != nil {
+			relations = append(relations, (*work.Relations)...)
+		}
 	}
-	return h.getWorkFromRecordingContext(ctx, rec.Recording)
+	if len(seen) == 0 {
+		return nil, nil
+	}
+	return &mb.Work{Relations: &relations}, lookupErr
 }
 
 func (h *GetTrackV2Handler) getWorkFromRecordingContext(ctx context.Context, rec mb.Recording) (*mb.Work, error) {

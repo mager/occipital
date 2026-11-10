@@ -1,6 +1,11 @@
 package occipital
 
 type Track struct {
+	Artists       []TrackArtist `json:"artists,omitempty"`
+	Explicit      bool          `json:"explicit"`
+	TrackNumber   int           `json:"track_number,omitempty"`
+	DiscNumber    int           `json:"disc_number,omitempty"`
+	CreditsStatus string        `json:"credits_status,omitempty"`
 	// ID is based on the MusicBrainz recording ID
 	ID       string `json:"id"`
 	Artist   string `json:"artist"`
@@ -29,14 +34,23 @@ type Track struct {
 	Popularity int `json:"popularity,omitempty"`
 }
 
+type TrackArtist struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	URL  string `json:"url"`
+}
+
 // TrackAlbum describes the selected Spotify edition, independently of audio features.
 type TrackAlbum struct {
-	ID                   string `json:"id"`
-	Name                 string `json:"name"`
-	ReleaseDate          string `json:"release_date"`
-	ReleaseDatePrecision string `json:"release_date_precision"`
-	AlbumType            string `json:"album_type"`
-	URL                  string `json:"url"`
+	Label                string   `json:"label,omitempty"`
+	TotalTracks          int      `json:"total_tracks,omitempty"`
+	Copyrights           []string `json:"copyrights,omitempty"`
+	ID                   string   `json:"id"`
+	Name                 string   `json:"name"`
+	ReleaseDate          string   `json:"release_date"`
+	ReleaseDatePrecision string   `json:"release_date_precision"`
+	AlbumType            string   `json:"album_type"`
+	URL                  string   `json:"url"`
 }
 
 type TrackMeta struct {

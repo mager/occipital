@@ -39,7 +39,9 @@ func testTrackHandler(t *testing.T, mbResponse func(*http.Request) (int, string)
 	previous := http.DefaultTransport
 	http.DefaultTransport = transport
 	t.Cleanup(func() { http.DefaultTransport = previous })
-	return NewGetTrackV2Handler(zap.NewNop().Sugar(), &spotify.SpotifyClient{Client: spot.New(&http.Client{Transport: transport})}, musicbrainz.ProvideMusicbrainz(), nil)
+	h := NewGetTrackV2Handler(zap.NewNop().Sugar(), &spotify.SpotifyClient{Client: spot.New(&http.Client{Transport: transport})}, musicbrainz.ProvideMusicbrainz(), nil)
+	h.apple = nil
+	return h
 }
 
 func TestTrackV2KeepsBasicMetadataWithoutAudioFeatures(t *testing.T) {
@@ -189,6 +191,7 @@ func TestTrackCacheRejectsStaleSchemaAndEmptyResults(t *testing.T) {
 
 func TestTrackV2EmptyAudioFeaturePayloadDoesNotInventMeasurements(t *testing.T) {
 	h := testTrackHandler(t, func(r *http.Request) (int, string) { return 200, `{"count":0,"recordings":[]}` }, 200)
+	h.audioEnabled = true
 	transport := http.DefaultTransport
 	h.spotifyClient.Client = spot.New(&http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if strings.Contains(r.URL.Path, "audio-features") {

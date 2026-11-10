@@ -39,14 +39,15 @@ type v2SourceConfig struct {
 // Higher weight = better signal for fresh music discovery.
 var v2Sources = []v2SourceConfig{
 	{collection: "spotify_new_releases", weight: 1.0, maxRank: 100},
-	{collection: "reddit_fresh", weight: 0.9, maxRank: 50},
+	{collection: "apple_music_charts", weight: 0.9, maxRank: 50},
 	{collection: "hnhh", weight: 0.7, maxRank: 100},
 	{collection: "pitchfork_bnm", weight: 0.6, maxRank: 20},
 	{collection: "billboard", weight: 0.5, maxRank: 100},
 }
 
 func (h *DiscoverV2Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
 	w.Header().Set("Content-Type", "application/json")
 
 	now := time.Now()
@@ -64,8 +65,8 @@ func (h *DiscoverV2Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Collect tracks from all sources, keyed by normalized artist+title
 	trackMap := make(map[string]*scoredTrack)
 	sourceMap := make(map[string]map[string]bool) // key -> set of sources
-	artistCount := make(map[string]int)            // cap tracks per artist
-	thumbCount := make(map[string]int)             // cap tracks per album art
+	artistCount := make(map[string]int)           // cap tracks per artist
+	thumbCount := make(map[string]int)            // cap tracks per album art
 	var latestDate string
 
 	const maxTracksPerArtist = 2
