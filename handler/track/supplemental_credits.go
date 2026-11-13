@@ -15,7 +15,37 @@ type reviewedCredits struct {
 }
 
 func reviewedCreditEntries() []reviewedCredits {
+	latinaWriters := []occipital.CreditArtist{
+		{Name: "Carolina Giraldo Navarro"}, {Name: "Daniela Aponte"},
+		{Name: "Alvaro José Arroyo Gonzalez"}, {Name: "Eliel Lind"},
+		{Name: "Leonardo Vasquez"}, {Name: "Natalie Albino"}, {Name: "Nicole Albino"},
+		{Name: "Ramón Ayala"}, {Name: "Victor Santiago"}, {Name: "Edwin Almonte"},
+		{Name: "Ralphy Ramirez"}, {Name: "Hector Mazzarri"}, {Name: "Misha"},
+	}
 	return []reviewedCredits{
+		{
+			// Universal Music Group's official single audio credits, reviewed
+			// 2026-11-13. The May 22 single title, artist and label agree with
+			// Spotify. Apple catalog track 1815568668 independently confirms
+			// the exact single title, artist, explicit rating and 159452 ms.
+			spotifyID: "10MpBpx64MNixmUMNj7f6b", isrc: "USUG12502629", title: "latina foreva", artist: "karol g", duration: 159452,
+			source: occipital.ExternalLink{Type: "youtube", URL: "https://www.youtube.com/watch?v=hJGsd2at5Qw"},
+			songs: []*occipital.TrackSongCredit{
+				{Credit: "composer", Artists: latinaWriters},
+				{Credit: "lyricist", Artists: latinaWriters},
+			},
+			production: []*occipital.TrackProductionCredit{
+				{Credit: "producer", Artists: []occipital.CreditArtist{{Name: "Mazzarri"}, {Name: "Misha"}}},
+				{Credit: "engineer", Artists: []occipital.CreditArtist{{Name: "Joel Iglesias"}}},
+				{Credit: "co-mixing engineer", Artists: []occipital.CreditArtist{{Name: "Joel Iglesias"}}},
+				{Credit: "mix", Artists: []occipital.CreditArtist{{Name: "Josh Gudwin"}}},
+				{Credit: "mastering", Artists: []occipital.CreditArtist{{Name: "Dave Kutch"}}},
+				{Credit: "additional mixing engineer", Artists: []occipital.CreditArtist{{Name: "Felix Byrne"}}},
+			},
+			performance: []*occipital.TrackInstrumentArtists{
+				{Instrument: "additional vocals", Artists: []occipital.CreditArtist{{Name: "Alexa Demie"}, {Name: "Raoul Alejandre"}}},
+			},
+		},
 		{
 			// Apple Music song page, reviewed 2026-11-09. Same title, artist,
 			// Hippie Castle EP and release date. Only published songwriting

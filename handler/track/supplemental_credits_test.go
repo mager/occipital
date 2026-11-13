@@ -159,3 +159,36 @@ func TestLimestoneReviewedSongwriters(t *testing.T) {
 		t.Fatal("credits applied to another recording")
 	}
 }
+
+func TestLatinaForevaReviewedCreditsAndEdition(t *testing.T) {
+	base := func() occipital.Track {
+		return occipital.Track{Source: "SPOTIFY", SourceID: "10MpBpx64MNixmUMNj7f6b", ISRC: "USUG12502629", Name: "LATINA FOREVA", Artist: "KAROL G", Meta: &occipital.TrackMeta{DurationMs: 159452}}
+	}
+	got := cachedReviewedTrack(t, base())
+	if len(got.SongCredits) != 2 || len(got.SongCredits[0].Artists) != 13 || len(got.ProductionCredits) != 6 || len(got.Instruments) != 1 {
+		t.Fatalf("missing published credits: %+v", got)
+	}
+	if got.ProductionCredits[0].Artists[0].Name != "Mazzarri" || got.ProductionCredits[0].Artists[1].Name != "Misha" || got.Instruments[0].Artists[0].Name != "Alexa Demie" || got.Instruments[0].Artists[1].Name != "Raoul Alejandre" {
+		t.Fatal("wrong people or roles")
+	}
+	if len(got.Links) != 1 || got.Links[0].URL != "https://www.youtube.com/watch?v=hJGsd2at5Qw" {
+		t.Fatal("missing official source")
+	}
+	for _, change := range []func(*occipital.Track){
+		func(v *occipital.Track) { v.SourceID = "2KrQbq3aqGOFGnkTKnN2XA" },
+		func(v *occipital.Track) { v.ISRC = "other" },
+		func(v *occipital.Track) { v.Name += " (Mixed)" },
+		func(v *occipital.Track) { v.Artist = "Cover artist" },
+		func(v *occipital.Track) { v.Meta.DurationMs++ },
+	} {
+		v := base()
+		change(&v)
+		applyReviewedCredits(&v)
+		if len(v.SongCredits)+len(v.ProductionCredits)+len(v.Instruments) > 0 {
+			t.Fatal("credits applied to a different edition")
+		}
+	}
+	if twice := cachedReviewedTrack(t, *got); !reflect.DeepEqual(twice, got) {
+		t.Fatal("duplicate credits on repeated load")
+	}
+}
