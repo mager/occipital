@@ -31,3 +31,11 @@ Melodex collects catalog candidates; Occipital ranks source appearances. Apple M
 
 - https://performance-partners.apple.com/tools
 - https://rss.marketingtools.apple.com/api/v2/us/music/most-played/50/songs.json
+
+## Song connections and studios (2026-11-13)
+
+Recording lookup now includes `recording-rels` and `place-rels` in the existing bounded request. Track responses expose `connections` for samples/remixes/edits and `studios` for recorded/mixed/produced/engineered places, with exact IDs, direction, optional area/date precision, and additional recording context. Cache schema is 10. Direct MBID navigation accepts canonical IDs after a MusicBrainz merge and avoids server-side cover-art fanout.
+
+Cloud Run uses `GODEBUG=tlsmlkem=0`. The default Go 1.24 hybrid key exchange caused MusicBrainz TLS handshakes to end with EOF from Cloud Run. A tagged revision with this documented Go compatibility setting returned the real recording and 29 connections; it was verified before traffic moved. Certificate verification, HTTPS, and the existing MusicBrainz IPv4 setting remain enabled. Retain this environment setting on future deployments unless a live handshake check proves it is no longer needed.
+
+The service has explicitly pinned traffic. A successful deploy alone does not move users: verify the image digest and revision, then update traffic to the verified revision in `beatbrain-dev`, `us-central1`.
