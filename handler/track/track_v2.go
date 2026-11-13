@@ -27,7 +27,7 @@ var spotifyTrackIDPattern = regexp.MustCompile(`^[A-Za-z0-9]{22}$`)
 const (
 	trackCacheCollection = "track_cache_v2"
 	trackCacheTTL        = 7 * 24 * time.Hour
-	trackCacheVersion    = 9
+	trackCacheVersion    = 10
 	trackRequestTimeout  = 8 * time.Second
 )
 
@@ -128,6 +128,8 @@ func (h *GetTrackV2Handler) fetchParallel(ctx context.Context, spotifyId string)
 	var audioFeats []*spot.AudioFeatures
 	var audioAnal *spot.AudioAnalysis
 	var mbRecording *mb.Recording
+	var connections []occipital.RecordingConnection
+	var studios []occipital.RecordingStudio
 	var mbWork *mb.Work
 	var enrichmentErr, appleErr error
 	var appleData *reviewedCredits
@@ -144,6 +146,8 @@ func (h *GetTrackV2Handler) fetchParallel(ctx context.Context, spotifyId string)
 			return
 		}
 		mbRecording = &rec.Recording
+		connections = getRecordingConnections(*rec)
+		studios = getRecordingStudios(*rec)
 		mbWork, enrichmentErr = h.getWorkFromDetails(mbCtx, *rec)
 	}()
 	if h.apple != nil {
@@ -176,8 +180,10 @@ func (h *GetTrackV2Handler) fetchParallel(ctx context.Context, spotifyId string)
 
 	// --- Assemble track ---
 	track := occipital.Track{
-		SourceID: spotifyId,
-		Source:   "SPOTIFY",
+		Connections: connections,
+		Studios:     studios,
+		SourceID:    spotifyId,
+		Source:      "SPOTIFY",
 	}
 
 	if fullTrack != nil {
@@ -359,6 +365,10 @@ func cacheableTrack(track *occipital.Track) bool {
 }
 
 func (h *GetTrackV2Handler) getWorkFromDetails(ctx context.Context, rec musicbrainz.RecordingDetails) (*mb.Work, error) {
+	return getWorkFromDetails(ctx, h.musicbrainzClient, rec)
+}
+
+func getWorkFromDetails(ctx context.Context, client *musicbrainz.MusicbrainzClient, rec musicbrainz.RecordingDetails) (*mb.Work, error) {
 	if rec.Relations == nil {
 		return nil, nil
 	}
@@ -380,7 +390,7 @@ func (h *GetTrackV2Handler) getWorkFromDetails(ctx context.Context, rec musicbra
 			}
 			lookups++
 			var err error
-			work, err = h.musicbrainzClient.GetWorkContext(ctx, id)
+			work, err = client.GetWorkContext(ctx, id)
 			if err != nil {
 				lookupErr = err
 				continue

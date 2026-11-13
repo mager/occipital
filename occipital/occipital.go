@@ -1,11 +1,13 @@
 package occipital
 
 type Track struct {
-	Artists       []TrackArtist `json:"artists,omitempty"`
-	Explicit      bool          `json:"explicit"`
-	TrackNumber   int           `json:"track_number,omitempty"`
-	DiscNumber    int           `json:"disc_number,omitempty"`
-	CreditsStatus string        `json:"credits_status,omitempty"`
+	Studios       []RecordingStudio     `json:"studios,omitempty"`
+	Connections   []RecordingConnection `json:"connections,omitempty"`
+	Artists       []TrackArtist         `json:"artists,omitempty"`
+	Explicit      bool                  `json:"explicit"`
+	TrackNumber   int                   `json:"track_number,omitempty"`
+	DiscNumber    int                   `json:"disc_number,omitempty"`
+	CreditsStatus string                `json:"credits_status,omitempty"`
 	// ID is based on the MusicBrainz recording ID
 	ID       string `json:"id"`
 	Artist   string `json:"artist"`
@@ -32,6 +34,25 @@ type Track struct {
 
 	Rank       int `json:"rank,omitempty"`
 	Popularity int `json:"popularity,omitempty"`
+}
+
+type RecordingStudio struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Area       string `json:"area,omitempty"`
+	Type       string `json:"type"`
+	Begin      string `json:"begin,omitempty"`
+	End        string `json:"end,omitempty"`
+	Additional bool   `json:"additional,omitempty"`
+}
+
+type RecordingConnection struct {
+	ID             string `json:"id"`
+	Title          string `json:"title"`
+	Artist         string `json:"artist,omitempty"`
+	Disambiguation string `json:"disambiguation,omitempty"`
+	Type           string `json:"type"`
+	Direction      string `json:"direction"`
 }
 
 type TrackArtist struct {

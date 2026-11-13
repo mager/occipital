@@ -164,9 +164,40 @@ func (c *MusicbrainzClient) SearchRecordingsContext(ctx context.Context, query s
 // Requesting work-level-rels removes a separate network call for songwriting.
 type RecordingDetails struct {
 	mb.Recording
-	Length int                `json:"length"`
-	Video  bool               `json:"video"`
-	Works  map[string]mb.Work `json:"-"`
+	Length             int                 `json:"length"`
+	Video              bool                `json:"video"`
+	Works              map[string]mb.Work  `json:"-"`
+	RecordingRelations []RecordingRelation `json:"-"`
+	PlaceRelations     []RecordingRelation `json:"-"`
+}
+
+// Keep recording targets and direction, which the older shared SDK omits.
+type RecordingRelation struct {
+	Begin      string   `json:"begin"`
+	End        string   `json:"end"`
+	Attributes []string `json:"attributes"`
+	Place      *struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+		Area struct {
+			Name string `json:"name"`
+		} `json:"area"`
+	} `json:"place"`
+	Type       string `json:"type"`
+	Direction  string `json:"direction"`
+	TargetType string `json:"target-type"`
+	Recording  *struct {
+		ID             string `json:"id"`
+		Title          string `json:"title"`
+		Disambiguation string `json:"disambiguation"`
+		ArtistCredit   []struct {
+			Name       string `json:"name"`
+			JoinPhrase string `json:"joinphrase"`
+			Artist     struct {
+				Name string `json:"name"`
+			} `json:"artist"`
+		} `json:"artist-credit"`
+	} `json:"recording"`
 }
 
 func (r *RecordingDetails) UnmarshalJSON(data []byte) error {
@@ -184,6 +215,20 @@ func (r *RecordingDetails) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &nested); err != nil {
 		return err
 	}
+	var connections struct {
+		Relations []RecordingRelation `json:"relations"`
+	}
+	if err := json.Unmarshal(data, &connections); err != nil {
+		return err
+	}
+	for _, relation := range connections.Relations {
+		if relation.TargetType == "recording" {
+			result.RecordingRelations = append(result.RecordingRelations, relation)
+		}
+		if relation.TargetType == "place" {
+			result.PlaceRelations = append(result.PlaceRelations, relation)
+		}
+	}
 	result.Works = make(map[string]mb.Work)
 	for _, relation := range nested.Relations {
 		if relation.TargetType == "work" && relation.Work != nil && relation.Work.ID != "" && relation.Work.Relations != nil {
@@ -196,7 +241,7 @@ func (r *RecordingDetails) UnmarshalJSON(data []byte) error {
 
 func (c *MusicbrainzClient) GetRecordingContext(ctx context.Context, id string) (RecordingDetails, error) {
 	var result RecordingDetails
-	err := c.getContext(ctx, "recording/"+url.PathEscape(id), url.Values{"inc": {"artist-credits+artist-rels+genres+isrcs+releases+work-rels+work-level-rels+url-rels"}}, &result)
+	err := c.getContext(ctx, "recording/"+url.PathEscape(id), url.Values{"inc": {"artist-credits+artist-rels+genres+isrcs+releases+work-rels+work-level-rels+url-rels+recording-rels+place-rels"}}, &result)
 	return result, err
 }
 

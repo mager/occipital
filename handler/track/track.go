@@ -1,6 +1,7 @@
 package track
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -116,34 +117,45 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// V3 Version based on MBID, MusicBrainz recording ID
 	if mbid != "" {
 		l.Infow("Fetching MusicBrainz recording", "mbid", mbid)
-		recording, err := h.musicbrainzClient.Client.GetRecording(mb.GetRecordingRequest{
-			ID: mbid,
-			Includes: []mb.Include{
-				"artist-credits",
-				"artist-rels",
-				"genres",
-				"isrcs",
-				"releases",
-				"work-rels",
-				"url-rels",
-			},
-		})
-		if err != nil {
-			l.Errorf("error fetching recording: %v", err)
+		if !recordingIDPattern.MatchString(mbid) {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "valid mbid required"})
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), trackRequestTimeout)
+		defer cancel()
+		recording, err := h.musicbrainzClient.GetRecordingContext(ctx, mbid)
+		if err != nil || !recordingIDPattern.MatchString(recording.ID) {
+			w.WriteHeader(http.StatusBadGateway)
+			json.NewEncoder(w).Encode(map[string]string{"error": "recording unavailable"})
+			return
+		}
+		artist := ""
+		if recording.ArtistCredits != nil {
+			artist = util.GetArtistCreditsFromRecording(*recording.ArtistCredits)
 		}
 
 		track := occipital.Track{
-			ID:                mbid,
-			ISRC:              isrc,
-			Name:              recording.Recording.Title,
-			Artist:            util.GetArtistCreditsFromRecording(*recording.Recording.ArtistCredits),
-			ReleaseDate:       recording.Recording.FirstReleaseDate,
-			Image:             getLatestReleaseImageURLWithLog(h.log, recording.Recording),
+			Connections: getRecordingConnections(recording),
+			Studios:     getRecordingStudios(recording),
+			ID:          recording.ID,
+			ISRC:        isrc,
+			Name:        recording.Recording.Title,
+			Artist:      artist,
+			ReleaseDate: recording.Recording.FirstReleaseDate,
+
 			Instruments:       getArtistInstrumentsForRecording(recording.Recording),
 			ProductionCredits: getProductionCreditsForRecording(recording.Recording),
 			Genres:            getGenresForRecording(recording.Recording),
 			Links:             getExternalLinksForRecording(recording.Recording),
-			Releases:          getReleasesFromRecordingWithLog(h.log, recording.Recording),
+			Releases:          getRecordingReleases(recording.Recording),
+		}
+
+		if track.Releases != nil && len(*track.Releases) > 0 {
+			track.Image = (*track.Releases)[0].Image
+		}
+		if recording.Length > 0 {
+			track.Meta = &occipital.TrackMeta{DurationMs: recording.Length, Key: -1, Mode: -1}
 		}
 
 		// If no ISRC was passed in the query, try to get one from the recording
@@ -156,35 +168,42 @@ func (h *GetTrackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		hasSpotifyLink := false
 		for _, link := range track.Links {
 			if link.Type == "spotify" {
-				hasSpotifyLink = true
-				break
+				u, err := url.Parse(link.URL)
+				if err == nil && u.Scheme == "https" && u.Host == "open.spotify.com" && u.User == nil {
+					id := strings.TrimPrefix(u.Path, "/track/")
+					if u.Path == "/track/"+id && spotifyTrackIDPattern.MatchString(id) {
+						track.SourceID, track.Source, hasSpotifyLink = id, "SPOTIFY", true
+						break
+					}
+				}
 			}
 		}
 		if track.ISRC != "" && !hasSpotifyLink {
 			l.Infow("Enriching with Spotify via ISRC", "isrc", track.ISRC)
-			ctx := r.Context()
 			results, err := h.spotifyClient.Client.Search(ctx, fmt.Sprintf("isrc:%s", track.ISRC), spot.SearchTypeTrack)
 			if err != nil {
 				l.Warnw("Spotify ISRC search failed", "error", err)
 			} else if results.Tracks != nil && len(results.Tracks.Tracks) > 0 {
 				spotTrack := results.Tracks.Tracks[0]
-				spotURL := fmt.Sprintf("https://open.spotify.com/track/%s", spotTrack.ID)
-				track.SourceID = string(spotTrack.ID)
-				track.Source = "SPOTIFY"
-				track.Links = append(track.Links, occipital.ExternalLink{
-					Type: "spotify",
-					URL:  spotURL,
-				})
-				l.Infow("Spotify enrichment successful", "spotify_id", spotTrack.ID)
+				if linkedRecordingMatches(recording, &spotTrack) {
+					spotURL := fmt.Sprintf("https://open.spotify.com/track/%s", spotTrack.ID)
+					track.SourceID = string(spotTrack.ID)
+					track.Source = "SPOTIFY"
+					track.Links = append(track.Links, occipital.ExternalLink{
+						Type: "spotify",
+						URL:  spotURL,
+					})
+					l.Infow("Spotify enrichment successful", "spotify_id", spotTrack.ID)
 
-				// Use Spotify image if MB didn't provide one
-				if track.Image == "" && len(spotTrack.Album.Images) > 0 {
-					track.Image = spotTrack.Album.Images[0].URL
+					// Spotify's catalog image is known; the CAA URL may have no cover.
+					if len(spotTrack.Album.Images) > 0 {
+						track.Image = spotTrack.Album.Images[0].URL
+					}
 				}
 			}
 		}
 
-		work := h.getWorkFromRecordingWithLog(recording.Recording)
+		work, _ := getWorkFromDetails(ctx, h.musicbrainzClient, recording)
 		if work != nil {
 			track.SongCredits = getSongCreditsForWork(*work)
 		}
