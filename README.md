@@ -67,3 +67,9 @@ The v2 track response includes `metadata_status`: `matched`, `unmatched`, or `un
 `handler/track/supplemental_credits.go` contains separately reviewed credits for exact Spotify editions. Each entry has a source URL, review date, ISRC, title, primary artist, and duration. It fills missing roles only and preserves existing populated roles. The Yoda entry was verified against Apple Music on 2026-11-09. This data does not resolve the observed Cloud Run → MusicBrainz TLS connection failures; that service availability issue remains separate.
 
 The v2 matcher first looks up the exact Spotify URL in MusicBrainz. A unique, current audio recording link must also agree on title (allowing explicit remaster/credited-guest suffixes), duration within two seconds, and any recorded ISRC. Conflicting links are rejected. When the URL is absent (404), the existing strict ISRC/name matcher is used. Recording requests include `work-level-rels`, and the local decoder retains embedded work relationships so songwriting normally needs no separate request. The overall eight-second request deadline remains in place.
+
+### Discovery freshness and cost controls
+
+`/discover/v2` returns `sources` with each source's snapshot date, current/delayed/unavailable status, matched/total counts, and latest attempt time. `updated` is the oldest available source date, not the newest. Failed updates keep good saved tracks available. Empty/unusable snapshots are skipped during fallback.
+
+Source reads run concurrently within the existing eight-second deadline. One process-local two-minute cache combines concurrent catalog requests. It contains no member or session data; request authentication still runs before the handler. Failed loads are not cached. No external cache service is added. Cloud Run keeps zero minimum instances and a maximum of two instances. These limits reduce cost but are not a hard monthly billing cap.

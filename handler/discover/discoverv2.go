@@ -3,10 +3,14 @@ package discover
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"math"
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"cloud.google.com/go/firestore"
@@ -16,8 +20,9 @@ import (
 )
 
 type DiscoverV2Handler struct {
-	log *zap.SugaredLogger
-	fs  *firestore.Client
+	log   *zap.SugaredLogger
+	fs    *firestore.Client
+	cache responseCache
 }
 
 func NewDiscoverV2Handler(log *zap.SugaredLogger, fs *firestore.Client) *DiscoverV2Handler {
@@ -50,7 +55,19 @@ func (h *DiscoverV2Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	w.Header().Set("Content-Type", "application/json")
 
-	now := time.Now()
+	response, err := h.cache.get(ctx, h.loadDiscovery)
+	if err != nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "discovery unavailable"})
+		return
+	}
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		h.log.Errorw("Discovery response write failed", "error", err)
+	}
+}
+
+func (h *DiscoverV2Handler) loadDiscovery(ctx context.Context) (*DiscoverResponse, error) {
+	now := time.Now().UTC()
 
 	type scoredTrack struct {
 		track       occipital.Track
@@ -72,11 +89,46 @@ func (h *DiscoverV2Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	const maxTracksPerArtist = 2
 	const maxTracksPerThumb = 1 // prevent same album cover flooding the wall
 
+	type sourceData struct {
+		tracks []fsClient.Track
+		date   string
+		err    error
+	}
+	fetched := make([]sourceData, len(v2Sources))
+	var workers sync.WaitGroup
+	for i, src := range v2Sources {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			fetched[i].tracks, fetched[i].date, fetched[i].err = h.fetchTracksWithFallback(ctx, now, src.collection)
+		}()
+	}
+	refs := make([]*firestore.DocumentRef, 0, len(v2Sources))
 	for _, src := range v2Sources {
-		tracks, dateUsed, err := h.fetchTracksWithFallback(ctx, now, src.collection)
+		refs = append(refs, h.fs.Collection("discovery_health").Doc(src.collection))
+	}
+	attempts, healthErr := h.fs.GetAll(ctx, refs)
+	if healthErr != nil {
+		h.log.Warnw("Source attempt status unavailable", "error", healthErr)
+	}
+	workers.Wait()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	health := make([]SourceHealth, 0, len(v2Sources))
+	readFailures := 0
+	for i, src := range v2Sources {
+		tracks, dateUsed, err := fetched[i].tracks, fetched[i].date, fetched[i].err
+		var attempt sourceAttempt
+		if healthErr == nil && i < len(attempts) && attempts[i].Exists() {
+			if err := attempts[i].DataTo(&attempt); err != nil {
+				h.log.Warnw("Invalid source attempt", "source", src.collection)
+			}
+		}
+		health = append(health, sourceHealth(src.collection, dateUsed, tracks, now, attempt))
 		if err != nil {
-			h.log.Warnw("Failed to fetch source, skipping",
-				"source", src.collection, "err", err)
+			readFailures++
+			h.log.Warnw("Failed to fetch source", "source", src.collection, "err", err)
 			continue
 		}
 
@@ -86,13 +138,13 @@ func (h *DiscoverV2Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"date", dateUsed,
 		)
 
-		if dateUsed > latestDate {
+		if dateUsed != "" && (latestDate == "" || dateUsed < latestDate) {
 			latestDate = dateUsed
 		}
 
 		for _, fsTrack := range tracks {
 			// Skip tracks without album art — they'd show as broken images
-			if fsTrack.Thumb == "" {
+			if !usableTrack(fsTrack) {
 				continue
 			}
 			oTrack := convertToOccipitalTrack(fsTrack, src.collection)
@@ -139,6 +191,9 @@ func (h *DiscoverV2Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if len(trackMap) == 0 && readFailures > 0 {
+		return nil, fmt.Errorf("discovery sources unavailable")
+	}
 	// Score all tracks
 	var results []scoredTrack
 	for key, st := range trackMap {
@@ -149,6 +204,9 @@ func (h *DiscoverV2Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Sort by score descending
 	sort.Slice(results, func(i, j int) bool {
+		if results[i].score == results[j].score {
+			return results[i].track.SourceID < results[j].track.SourceID
+		}
 		return results[i].score > results[j].score
 	})
 
@@ -168,6 +226,7 @@ func (h *DiscoverV2Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	resp := &DiscoverResponse{
 		Tracks:  finalTracks,
 		Updated: latestDate,
+		Sources: health,
 	}
 
 	h.log.Infow("Discover v2 response",
@@ -175,10 +234,7 @@ func (h *DiscoverV2Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"updated", latestDate,
 	)
 
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		h.log.Error("Error encoding response", zap.Error(err))
-		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-	}
+	return resp, nil
 }
 
 // computeScore implements the melodex v2 scoring algorithm.
@@ -225,13 +281,26 @@ func (h *DiscoverV2Handler) fetchTracksWithFallback(ctx context.Context, now tim
 	for i := 0; i <= maxDaysToLookBack; i++ {
 		date := now.AddDate(0, 0, -i).Format("2006-01-02")
 		doc, err := col.Doc(date).Get(ctx)
-		if err != nil {
+		if status.Code(err) == codes.NotFound {
 			continue
+		}
+		if err != nil {
+			return nil, "", err
 		}
 		var tracksDoc fsClient.TracksDoc
 		if err := doc.DataTo(&tracksDoc); err != nil {
 			h.log.Warnw("Error decoding tracks doc",
 				"collection", collection, "date", date, "err", err)
+			continue
+		}
+		usable := false
+		for _, track := range tracksDoc.Tracks {
+			if usableTrack(track) {
+				usable = true
+				break
+			}
+		}
+		if !usable {
 			continue
 		}
 		if i > 0 {

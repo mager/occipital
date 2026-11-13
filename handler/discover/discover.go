@@ -12,6 +12,7 @@ const maxDaysToLookBack = 5
 type DiscoverResponse struct {
 	Tracks  []occipital.Track `json:"tracks"`
 	Updated string            `json:"updated"`
+	Sources []SourceHealth    `json:"sources"`
 }
 
 func convertToOccipitalTrack(fsTrack fsClient.Track, thumbType string) occipital.Track {
