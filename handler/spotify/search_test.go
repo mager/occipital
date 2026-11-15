@@ -152,3 +152,78 @@ func TestSearchPropagatesCancellationAndDeadline(t *testing.T) {
 		})
 	}
 }
+
+func TestSearchSupportsArtistsAndCombinedResults(t *testing.T) {
+	for _, tc := range []struct {
+		kind, upstream string
+		tracks         int
+	}{
+		{"artist", "artist", 0},
+		{"all", "artist,track", 1},
+	} {
+		t.Run(tc.kind, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Query().Get("type") != tc.upstream {
+					t.Errorf("search type = %q, want %q", r.URL.Query().Get("type"), tc.upstream)
+				}
+				io.WriteString(w, `{"tracks":{"items":[{"id":"track","name":"Happy","artists":[{"name":"Pharrell Williams"}]}]},"artists":{"items":[{"id":"2RdwBSPQiwcmiDo9kixcl8","name":"Pharrell Williams","images":[{"url":"https://i.scdn.co/image/abc"}],"external_urls":{"spotify":"https://attacker.test"}},{"id":"0000000000000000000000","name":"No image","images":[{"url":"https://attacker.test/image"}]},{"id":"invalid/id","name":"Invalid"}]}}`)
+			}))
+			defer server.Close()
+			w := httptest.NewRecorder()
+			searchHandlerForServer(server).ServeHTTP(w, httptest.NewRequest("POST", "/spotify/search", strings.NewReader(`{"query":"Pharrell","type":"`+tc.kind+`"}`)))
+			var body struct {
+				Results []SearchTrack `json:"results"`
+				Artists []struct {
+					ID, Name, URL string
+					Image         *string
+				} `json:"artists"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || w.Code != 200 {
+				t.Fatalf("response = %d %s", w.Code, w.Body.String())
+			}
+			if len(body.Results) != tc.tracks || len(body.Artists) != 2 {
+				t.Fatalf("unexpected response: %s", w.Body.String())
+			}
+			if body.Artists[0].URL != "https://open.spotify.com/artist/2RdwBSPQiwcmiDo9kixcl8" || body.Artists[0].Image == nil || *body.Artists[0].Image != "https://i.scdn.co/image/abc" || body.Artists[1].Image != nil {
+				t.Errorf("unsafe artist links or images: %s", w.Body.String())
+			}
+		})
+	}
+}
+
+func TestSearchRejectsUnknownType(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		io.WriteString(w, `{}`)
+	}))
+	defer server.Close()
+	w := httptest.NewRecorder()
+	searchHandlerForServer(server).ServeHTTP(w, httptest.NewRequest("POST", "/spotify/search", strings.NewReader(`{"query":"music","type":"album"}`)))
+	if w.Code != 400 || calls.Load() != 0 || !json.Valid(w.Body.Bytes()) {
+		t.Fatalf("response = %d %s, calls = %d", w.Code, w.Body.String(), calls.Load())
+	}
+}
+
+func TestArtistSearchLimitsAndEmptyResults(t *testing.T) {
+	for _, tc := range []struct{ body, limit string }{
+		{`{"query":"music","type":"all"}`, "10"},
+		{`{"query":"music","type":"artist","limit":50}`, "10"},
+		{`{"query":"music","type":"artist","limit":3}`, "3"},
+	} {
+		t.Run(tc.body, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Query().Get("limit") != tc.limit {
+					t.Errorf("upstream limit = %q, want %s", r.URL.Query().Get("limit"), tc.limit)
+				}
+				io.WriteString(w, `{}`)
+			}))
+			defer server.Close()
+			w := httptest.NewRecorder()
+			searchHandlerForServer(server).ServeHTTP(w, httptest.NewRequest("POST", "/spotify/search", strings.NewReader(tc.body)))
+			if w.Code != 200 || strings.TrimSpace(w.Body.String()) != `{"results":[],"artists":[]}` {
+				t.Errorf("response = %d %s", w.Code, w.Body.String())
+			}
+		})
+	}
+}

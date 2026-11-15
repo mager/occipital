@@ -18,7 +18,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// SearchHandler searches the public track catalog without user authorization.
+// SearchHandler searches the Spotify catalog with the service credentials.
 type SearchHandler struct {
 	log           *zap.SugaredLogger
 	spotifyClient *spotify.SpotifyClient
@@ -39,10 +39,12 @@ func NewSearchHandler(log *zap.SugaredLogger, spotifyClient *spotify.SpotifyClie
 type SearchRequest struct {
 	Query string `json:"query"`
 	Limit int    `json:"limit"`
+	Type  string `json:"type"`
 }
 
 type SearchResponse struct {
-	Results []SearchTrack `json:"results"`
+	Results []SearchTrack   `json:"results"`
+	Artists *[]SearchArtist `json:"artists,omitempty"`
 }
 
 type SearchTrack struct {
@@ -107,15 +109,29 @@ func (h *SearchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		util.WriteJSONError(w, http.StatusBadRequest, "limit must not be negative")
 		return
 	}
+	searchType := spot.SearchType(spot.SearchTypeTrack)
+	switch req.Type {
+	case "", "track":
+	case "all":
+		searchType |= spot.SearchTypeArtist
+	case "artist":
+		searchType = spot.SearchTypeArtist
+	default:
+		util.WriteJSONError(w, http.StatusBadRequest, "invalid search type")
+		return
+	}
 	if req.Limit == 0 {
 		req.Limit = 20
 	} else if req.Limit > 50 {
 		req.Limit = 50
 	}
+	if searchType&spot.SearchTypeArtist != 0 && req.Limit > 10 {
+		req.Limit = 10
+	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()
-	results, err := h.spotifyClient.Client.Search(ctx, req.Query, spot.SearchTypeTrack, spot.Limit(req.Limit))
+	results, err := h.spotifyClient.Client.Search(ctx, req.Query, searchType, spot.Limit(req.Limit))
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			return
@@ -131,7 +147,7 @@ func (h *SearchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	resp := SearchResponse{Results: make([]SearchTrack, 0)}
 
-	if results.Tracks != nil {
+	if results.Tracks != nil && searchType&spot.SearchTypeTrack != 0 {
 		for _, item := range results.Tracks.Tracks {
 			resp.Results = append(resp.Results, mapTrack(item))
 		}
@@ -140,6 +156,17 @@ func (h *SearchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		sort.Slice(resp.Results, func(i, j int) bool {
 			return resp.Results[i].Popularity > resp.Results[j].Popularity
 		})
+	}
+	if searchType&spot.SearchTypeArtist != 0 {
+		artists := make([]SearchArtist, 0)
+		if results.Artists != nil {
+			for _, item := range results.Artists.Artists {
+				if spotifyIDPattern.MatchString(string(item.ID)) && strings.TrimSpace(item.Name) != "" {
+					artists = append(artists, mapArtist(item))
+				}
+			}
+		}
+		resp.Artists = &artists
 	}
 
 	json.NewEncoder(w).Encode(resp)

@@ -61,6 +61,7 @@ func main() {
 
 			AsRoute(health.NewHealthHandler),
 			AsRoute(spotHandler.NewSearchHandler),
+			AsRoute(spotHandler.NewArtistHandler),
 			AsRoute(spotHandler.NewRecommendedTracksHandler),
 			AsRoute(trackHandler.NewGetTrackHandler),
 			AsRoute(discoverHandler.NewDiscoverV2Handler),
@@ -115,6 +116,8 @@ func NewHTTPServer(
 
 	spotifySearchHandler := spotHandler.NewSearchHandler(logger, spotifyClient)
 	router.Handle(spotifySearchHandler.Pattern(), spotifySearchHandler)
+	spotifyArtistHandler := spotHandler.NewArtistHandler(logger, spotifyClient)
+	router.Handle(spotifyArtistHandler.Pattern(), spotifyArtistHandler)
 
 	spotifyRecommendedTracksHandler := spotHandler.NewRecommendedTracksHandler(logger, spotifyClient)
 	router.Handle(spotifyRecommendedTracksHandler.Pattern(), spotifyRecommendedTracksHandler)

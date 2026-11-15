@@ -33,7 +33,7 @@ func TestServerRequiresAPIKeyForEveryPrivatePath(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("BEATBRAIN_API_KEY", tc.key)
 			server := NewHTTPServer(fxtest.NewLifecycle(t), nil, nil, nil, zap.NewNop().Sugar())
-			for _, path := range []string{"/spotify/search", "/profile", "/discover/v2", "/auth/spotify", "/auth/spotify/callback", "/spotify/play", "/np", "/unknown"} {
+			for _, path := range []string{"/spotify/search", "/artist", "/profile", "/discover/v2", "/auth/spotify", "/auth/spotify/callback", "/spotify/play", "/np", "/unknown"} {
 				r := httptest.NewRequest("GET", path, nil)
 				r.Header.Set("X-Beatbrain-Key", tc.header)
 				w := httptest.NewRecorder()

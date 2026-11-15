@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -128,6 +129,15 @@ func albumKey(s string) string {
 func combinedArtistKey(s string) string {
 	return strings.Join(strings.Fields(strings.NewReplacer(",", " ", "&", " ").Replace(normalizedName(s))), " ")
 }
+
+// Spotify and Apple can wrap the same quoted soundtrack label differently.
+// Keep the full label and all edition qualifiers; only change its final wrapper.
+var appleSoundtrackSuffix = regexp.MustCompile(` - from ("[^"]+")$`)
+
+func appleTitleKey(s string) string {
+	return appleSoundtrackSuffix.ReplaceAllString(normalizedName(s), " (from $1)")
+}
+
 func selectAppleTrack(body []byte, track *spot.FullTrack) (*appleCatalogTrack, error) {
 	var result struct {
 		Results []appleCatalogTrack `json:"results"`
@@ -146,7 +156,7 @@ func selectAppleTrack(body []byte, track *spot.FullTrack) (*appleCatalogTrack, e
 			delta = -delta
 		}
 		rating := candidate.Rating == "explicit" && track.Explicit || candidate.Rating == "notExplicit" && !track.Explicit
-		if candidate.ID <= 0 || normalizedName(candidate.Name) != normalizedName(track.Name) || albumKey(candidate.Album) != albumKey(track.Album.Name) || combinedArtistKey(candidate.Artist) != combinedArtistKey(strings.Join(names, ", ")) || candidate.Duration <= 0 || delta > 1000 || !rating {
+		if candidate.ID <= 0 || appleTitleKey(candidate.Name) != appleTitleKey(track.Name) || albumKey(candidate.Album) != albumKey(track.Album.Name) || combinedArtistKey(candidate.Artist) != combinedArtistKey(strings.Join(names, ", ")) || candidate.Duration <= 0 || delta > 1000 || !rating {
 			continue
 		}
 		if match != nil && match.ID != candidate.ID {
@@ -245,7 +255,7 @@ func parseAppleCredits(body []byte, match appleCatalogTrack, track *spot.FullTra
 			artists = append(artists, normalizedName(artist.Title))
 		}
 		sort.Strings(artists)
-		verified = header.Descriptor.Identifiers.ID == id && normalizedName(header.Title) == normalizedName(track.Name) && albumKey(header.Album) == albumKey(match.Album) && strings.Join(artists, "\x00") == strings.Join(expected, "\x00")
+		verified = header.Descriptor.Identifiers.ID == id && appleTitleKey(header.Title) == appleTitleKey(track.Name) && albumKey(header.Album) == albumKey(match.Album) && strings.Join(artists, "\x00") == strings.Join(expected, "\x00")
 	}
 	if !verified {
 		return nil, fmt.Errorf("credits page identity mismatch")
