@@ -28,13 +28,15 @@ const (
 	trackCacheCollection = "track_cache_v2"
 	trackCacheTTL        = 7 * 24 * time.Hour
 	trackCacheVersion    = 10
+	appleTitleVersion    = 1
 	trackRequestTimeout  = 8 * time.Second
 )
 
 type cachedTrackDoc struct {
-	Version   int       `firestore:"version"`
-	TrackJSON string    `firestore:"track_json"`
-	CachedAt  time.Time `firestore:"cached_at"`
+	Version           int       `firestore:"version"`
+	AppleTitleVersion int       `firestore:"apple_title_version"`
+	TrackJSON         string    `firestore:"track_json"`
+	CachedAt          time.Time `firestore:"cached_at"`
 }
 
 // GetTrackV2Handler is a fast, parallel, cached track handler.
@@ -335,6 +337,10 @@ func readCachedTrack(cached cachedTrackDoc) (*occipital.Track, bool) {
 	if !cacheableTrack(&track) || ((track.ID == "" || track.CreditsStatus == "missing") && time.Since(cached.CachedAt) > time.Hour) {
 		return nil, false
 	}
+	// Retry misses from before Apple soundtrack title wrappers were matched.
+	if cached.AppleTitleVersion < appleTitleVersion && track.CreditsStatus == "missing" && appleTitleKey(track.Name) != normalizedName(track.Name) {
+		return nil, false
+	}
 	applyReviewedCredits(&track)
 	return &track, true
 }
@@ -349,9 +355,10 @@ func (h *GetTrackV2Handler) saveToCache(ctx context.Context, spotifyId string, t
 		return
 	}
 	_, err = h.db.Collection(trackCacheCollection).Doc(spotifyId).Set(ctx, cachedTrackDoc{
-		Version:   trackCacheVersion,
-		TrackJSON: string(b),
-		CachedAt:  time.Now(),
+		Version:           trackCacheVersion,
+		AppleTitleVersion: appleTitleVersion,
+		TrackJSON:         string(b),
+		CachedAt:          time.Now(),
 	})
 	if err != nil {
 		h.log.Warnw("Failed to write track cache", "spotify_id", spotifyId, "error", err)

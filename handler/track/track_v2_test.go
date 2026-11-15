@@ -189,6 +189,47 @@ func TestTrackCacheRejectsStaleSchemaAndEmptyResults(t *testing.T) {
 	}
 }
 
+func TestTrackCacheRetriesMissingSoundtrackCredits(t *testing.T) {
+	for _, tc := range []struct {
+		name, title, status string
+		appleTitleVersion   int
+		want                bool
+	}{
+		{"old dash soundtrack missing", `Happy - From "Despicable Me 2"`, "missing", 0, false},
+		{"retried dash soundtrack missing", `Happy - From "Despicable Me 2"`, "missing", 1, true},
+		{"dash soundtrack available", `Happy - From "Despicable Me 2"`, "available", 0, true},
+		{"dash soundtrack unavailable", `Happy - From "Despicable Me 2"`, "unavailable", 0, true},
+		{"ordinary title missing", "Happy", "missing", 0, true},
+		{"parenthetical soundtrack missing", `Happy (From "Despicable Me 2")`, "missing", 0, true},
+		{"unquoted soundtrack missing", "Happy - From Despicable Me 2", "missing", 0, true},
+		{"soundtrack remix missing", `Happy - From "Despicable Me 2" - Remix`, "missing", 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			track := occipital.Track{
+				SourceID:      "60nZcImufyMA1MKQY3dcCH",
+				Name:          tc.title,
+				Artist:        "Pharrell Williams",
+				CreditsStatus: tc.status,
+				Meta:          &occipital.TrackMeta{DurationMs: 233306},
+			}
+			body, err := json.Marshal(track)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cached := cachedTrackDoc{
+				Version:           trackCacheVersion,
+				AppleTitleVersion: tc.appleTitleVersion,
+				CachedAt:          time.Now().Add(-time.Minute),
+				TrackJSON:         string(body),
+			}
+			_, ok := readCachedTrack(cached)
+			if ok != tc.want {
+				t.Fatalf("cache accepted = %v, want %v", ok, tc.want)
+			}
+		})
+	}
+}
+
 func TestTrackV2EmptyAudioFeaturePayloadDoesNotInventMeasurements(t *testing.T) {
 	h := testTrackHandler(t, func(r *http.Request) (int, string) { return 200, `{"count":0,"recordings":[]}` }, 200)
 	h.audioEnabled = true
