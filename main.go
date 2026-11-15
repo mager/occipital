@@ -68,6 +68,7 @@ func main() {
 			AsRoute(podcastHandler.NewCategoriesHandler),
 			AsRoute(podcastHandler.NewShowsHandler),
 			AsRoute(creatorHandler.NewGetCreatorHandler),
+			AsRoute(creatorHandler.NewGetCreatorDiscoveryHandler),
 		),
 		fx.Invoke(func(*http.Server) {}),
 	).Run()
@@ -134,6 +135,8 @@ func NewHTTPServer(
 
 	getCreatorHandler := creatorHandler.NewGetCreatorHandler(logger, musicbrainzClient, spotifyClient)
 	router.Handle(getCreatorHandler.Pattern(), getCreatorHandler)
+	creatorDiscoveryHandler := creatorHandler.NewGetCreatorDiscoveryHandler(logger)
+	router.Handle(creatorDiscoveryHandler.Pattern(), creatorDiscoveryHandler)
 
 	// Podcast handlers
 	podcastCategoriesHandler := podcastHandler.NewCategoriesHandler(logger, fs)

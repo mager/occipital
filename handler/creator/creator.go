@@ -3,305 +3,268 @@ package creator
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"net/http"
+	"net/url"
+	"regexp"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
-	mb "github.com/mager/musicbrainz-go/musicbrainz"
 	"github.com/mager/occipital/musicbrainz"
 	"github.com/mager/occipital/occipital"
 	"github.com/mager/occipital/spotify"
-	spotifyLib "github.com/zmb3/spotify/v2"
 	"go.uber.org/zap"
+	"golang.org/x/sync/singleflight"
 )
 
-// GetCreatorHandler is an http.Handler
+var mbidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+var errIncompleteCreator = errors.New("incomplete creator data")
+
+type cachedCreator struct {
+	value   occipital.Creator
+	expires time.Time
+}
 type GetCreatorHandler struct {
 	log               *zap.SugaredLogger
 	musicbrainzClient *musicbrainz.MusicbrainzClient
-	spotifyClient     *spotify.SpotifyClient
+	mu                sync.Mutex
+	cache             map[string]cachedCreator
+	pending           singleflight.Group
 }
 
-func (*GetCreatorHandler) Pattern() string {
-	return "/creator"
-}
-
-// NewGetCreatorHandler builds a new GetCreatorHandler.
-func NewGetCreatorHandler(
-	log *zap.SugaredLogger,
-	musicbrainzClient *musicbrainz.MusicbrainzClient,
-	spotifyClient *spotify.SpotifyClient,
-) *GetCreatorHandler {
-	return &GetCreatorHandler{
-		log:               log,
-		musicbrainzClient: musicbrainzClient,
-		spotifyClient:     spotifyClient,
-	}
+func (*GetCreatorHandler) Pattern() string { return "/creator" }
+func NewGetCreatorHandler(log *zap.SugaredLogger, c *musicbrainz.MusicbrainzClient, _ *spotify.SpotifyClient) *GetCreatorHandler {
+	return &GetCreatorHandler{log: log, musicbrainzClient: c, cache: make(map[string]cachedCreator)}
 }
 
 type GetCreatorResponse struct {
 	Creator occipital.Creator `json:"creator"`
 }
 
+func creatorError(w http.ResponseWriter, status int, message string) {
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]string{"error": message})
+}
 func (h *GetCreatorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	q := r.URL.Query()
-	mbid := q.Get("mbid")
-
-	if mbid == "" {
-		http.Error(w, `{"error":"mbid is required"}`, http.StatusBadRequest)
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		creatorError(w, 405, "Method not allowed.")
 		return
 	}
-
-	h.log.Infow("Fetching MusicBrainz artist", "mbid", mbid)
-
-	artistResp, err := h.musicbrainzClient.Client.GetArtist(mb.GetArtistRequest{
-		ID: mbid,
-		Includes: []mb.Include{
-			"genres",
-			"url-rels",
-			"recording-rels",
-			"artist-credits",
-		},
+	ids := r.URL.Query()["mbid"]
+	if len(ids) != 1 || !mbidPattern.MatchString(ids[0]) {
+		creatorError(w, 400, "A valid creator ID is required.")
+		return
+	}
+	id := strings.ToLower(ids[0])
+	h.mu.Lock()
+	cached, ok := h.cache[id]
+	h.mu.Unlock()
+	if ok && time.Now().Before(cached.expires) {
+		json.NewEncoder(w).Encode(GetCreatorResponse{Creator: cached.value})
+		return
+	}
+	pending := h.pending.DoChan(id, func() (any, error) {
+		// A cancelled viewer does not cancel another viewer's shared request.
+		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+		defer cancel()
+		return h.loadCreator(ctx, id)
 	})
-	if err != nil {
-		h.log.Errorf("error fetching artist: %v", err)
-		http.Error(w, `{"error":"failed to fetch artist"}`, http.StatusInternalServerError)
+	select {
+	case <-r.Context().Done():
 		return
+	case result := <-pending:
+		if result.Err != nil {
+			if musicbrainz.IsNotFound(result.Err) {
+				creatorError(w, 404, "This creator was not found.")
+				return
+			}
+			if errors.Is(result.Err, errIncompleteCreator) {
+				creatorError(w, 502, "The music source returned incomplete creator data.")
+				return
+			}
+			h.log.Warnw("Creator metadata unavailable", "error", result.Err)
+			creatorError(w, 503, "Creator credits could not be loaded. Please try again.")
+			return
+		}
+		json.NewEncoder(w).Encode(GetCreatorResponse{Creator: result.Val.(occipital.Creator)})
 	}
-
-	creator := transformArtistToCreator(artistResp.Artist)
-
-	// Fetch Spotify highlights
-	highlights := h.fetchHighlights(creator.Links)
-	if len(highlights) > 0 {
-		creator.Highlights = highlights
-	}
-
-	resp := GetCreatorResponse{Creator: creator}
-	json.NewEncoder(w).Encode(resp)
 }
 
-// fetchHighlights extracts the Spotify artist ID from links and fetches top tracks.
-func (h *GetCreatorHandler) fetchHighlights(links []occipital.ExternalLink) []occipital.CreatorHighlight {
-	spotifyID := extractSpotifyArtistID(links)
-	if spotifyID == "" {
-		return nil
+func (h *GetCreatorHandler) loadCreator(ctx context.Context, id string) (occipital.Creator, error) {
+	h.mu.Lock()
+	cached, ok := h.cache[id]
+	h.mu.Unlock()
+	if ok && time.Now().Before(cached.expires) {
+		return cached.value, nil
 	}
-
-	h.log.Infow("Fetching Spotify top tracks", "spotifyArtistID", spotifyID)
-
-	ctx := context.Background()
-	topTracks, err := h.spotifyClient.Client.GetArtistsTopTracks(ctx, spotifyLib.ID(spotifyID), "US")
+	artist, err := h.musicbrainzClient.GetCreatorArtistContext(ctx, id)
 	if err != nil {
-		h.log.Warnw("Failed to fetch Spotify top tracks", "err", err)
-		return nil
+		return occipital.Creator{}, err
 	}
-
-	var highlights []occipital.CreatorHighlight
-	for _, track := range topTracks {
-		image := ""
-		if track.Album.Images != nil && len(track.Album.Images) > 0 {
-			image = track.Album.Images[0].URL
-		}
-
-		// Build artist string
-		var artists []string
-		for _, a := range track.Artists {
-			artists = append(artists, a.Name)
-		}
-
-		highlights = append(highlights, occipital.CreatorHighlight{
-			ID:     string(track.ID),
-			Title:  track.Name,
-			Artist: strings.Join(artists, ", "),
-			Image:  image,
-		})
+	if !mbidPattern.MatchString(artist.ID) || strings.TrimSpace(artist.Name) == "" || artist.Relations == nil {
+		return occipital.Creator{}, errIncompleteCreator
 	}
-
-	// Cap at 10 highlights
-	if len(highlights) > 10 {
-		highlights = highlights[:10]
-	}
-
-	return highlights
-}
-
-// extractSpotifyArtistID finds the Spotify artist ID from MusicBrainz URL relations.
-// Looks for URLs like https://open.spotify.com/artist/XXXXX
-func extractSpotifyArtistID(links []occipital.ExternalLink) string {
-	for _, link := range links {
-		if strings.Contains(link.URL, "open.spotify.com/artist/") {
-			parts := strings.Split(link.URL, "/artist/")
-			if len(parts) == 2 {
-				// Strip any query params
-				id := parts[1]
-				if idx := strings.Index(id, "?"); idx > 0 {
-					id = id[:idx]
-				}
-				return id
+	creator := transformCreator(artist)
+	h.mu.Lock()
+	if len(h.cache) >= 64 {
+		oldestKey := ""
+		var oldest time.Time
+		for key, item := range h.cache {
+			if oldestKey == "" || item.expires.Before(oldest) {
+				oldestKey, oldest = key, item.expires
 			}
 		}
+		delete(h.cache, oldestKey)
 	}
-	return ""
+	h.cache[id] = cachedCreator{creator, time.Now().Add(15 * time.Minute)}
+	h.mu.Unlock()
+	return creator, nil
 }
-
-func transformArtistToCreator(artist mb.Artist) occipital.Creator {
-	creator := occipital.Creator{
-		ID:             artist.ID,
-		Name:           artist.Name,
-		Type:           artist.Type,
-		Disambiguation: artist.Disambiguation,
-		Country:        artist.Country,
-		Genres:         extractGenres(artist),
-		Links:          extractLinks(artist),
-		Credits:        extractCredits(artist),
+func transformCreator(a *musicbrainz.CreatorArtist) occipital.Creator {
+	c := occipital.Creator{ID: a.ID, Name: a.Name, Type: a.Type, Disambiguation: a.Disambiguation, Country: a.Country,
+		Genres: []string{}, Links: []occipital.ExternalLink{}, Credits: []occipital.CreatorCredit{}, Catalog: []occipital.CreatorCatalogEntry{}, Connections: []occipital.CreatorConnection{}, SourceURL: "https://musicbrainz.org/artist/" + a.ID + "/relationships"}
+	if a.Area != nil {
+		c.Area = a.Area.Name
 	}
-
-	if artist.Area != nil {
-		creator.Area = artist.Area.Name
+	if a.BeginArea != nil {
+		c.BeginArea = a.BeginArea.Name
 	}
-	if artist.BeginArea != nil {
-		creator.BeginArea = artist.BeginArea.Name
+	if a.LifeSpan != nil {
+		c.ActiveYears = &occipital.ActiveYears{Begin: a.LifeSpan.Begin, End: a.LifeSpan.End, Ended: a.LifeSpan.Ended}
 	}
-	if artist.LifeSpan != nil {
-		creator.ActiveYears = &occipital.ActiveYears{
-			Begin: artist.LifeSpan.Begin,
-			End:   artist.LifeSpan.End,
-			Ended: artist.LifeSpan.Ended,
+	if a.Genres != nil {
+		for _, g := range *a.Genres {
+			if g.Name != "" {
+				c.Genres = append(c.Genres, g.Name)
+			}
 		}
+		sort.Strings(c.Genres)
 	}
-
-	return creator
-}
-
-func extractGenres(artist mb.Artist) []string {
-	maxGenres := 10
-	genres := make([]string, 0)
-
-	if artist.Genres == nil || len(*artist.Genres) == 0 {
-		return genres
-	}
-
-	genresSlice := *artist.Genres
-	sort.Slice(genresSlice, func(i, j int) bool {
-		return genresSlice[i].Count > genresSlice[j].Count
-	})
-
-	for i := 0; i < maxGenres && i < len(genresSlice); i++ {
-		genres = append(genres, genresSlice[i].Name)
-	}
-
-	return genres
-}
-
-func extractLinks(artist mb.Artist) []occipital.ExternalLink {
-	var links []occipital.ExternalLink
-
-	if artist.Relations == nil {
-		return links
-	}
-
-	supportedDomains := map[string]string{
-		"spotify":    "spotify",
-		"wikipedia":  "wikipedia",
-		"bandcamp":   "bandcamp",
-		"soundcloud": "soundcloud",
-		"discogs":    "discogs",
-		"allmusic":   "allmusic",
-		"youtube":    "youtube",
-		"instagram":  "instagram",
-		"twitter":    "twitter",
-		"facebook":   "facebook",
-		"wikidata":   "wikidata",
-	}
-
-	for _, rel := range *artist.Relations {
+	catalog := map[string]*occipital.CreatorCatalogEntry{}
+	connections := map[string]bool{}
+	links := map[string]bool{}
+	for _, rel := range a.Relations {
 		if rel.TargetType == "url" {
-			for domain, linkType := range supportedDomains {
-				if strings.Contains(rel.URL.Resource, domain) {
-					links = append(links, occipital.ExternalLink{
-						Type: linkType,
-						URL:  rel.URL.Resource,
-					})
-					break
-				}
+			u, err := url.Parse(rel.URL.Resource)
+			if err == nil && (u.Scheme == "https" || u.Scheme == "http") && u.Hostname() != "" && !links[u.String()] {
+				links[u.String()] = true
+				c.Links = append(c.Links, occipital.ExternalLink{Type: strings.TrimPrefix(u.Hostname(), "www."), URL: u.String()})
+			}
+			continue
+		}
+		if rel.TargetType == "artist" && rel.Type == "member of band" && rel.Artist != nil && mbidPattern.MatchString(rel.Artist.ID) && rel.Artist.ID != a.ID && rel.Artist.Name != "" {
+			label := "Member of"
+			if rel.Direction == "backward" {
+				label = "Member"
+			} else if rel.Direction != "forward" {
+				continue
+			}
+			key := rel.Artist.ID + "|" + label + "|" + rel.Begin + "|" + rel.End
+			if !connections[key] {
+				connections[key] = true
+				c.Connections = append(c.Connections, occipital.CreatorConnection{ID: rel.Artist.ID, Name: rel.Artist.Name, Relation: label, Begin: rel.Begin, End: rel.End, Ended: rel.Ended})
+			}
+			continue
+		}
+		var entity *musicbrainz.CreatorEntity
+		switch rel.TargetType {
+		case "recording":
+			entity = rel.Recording
+		case "release":
+			entity = rel.Release
+		case "work":
+			entity = rel.Work
+		}
+		if entity == nil || !mbidPattern.MatchString(entity.ID) || strings.TrimSpace(entity.Title) == "" || strings.TrimSpace(rel.Type) == "" {
+			continue
+		}
+		key := rel.TargetType + ":" + strings.ToLower(entity.ID)
+		item := catalog[key]
+		if item == nil {
+			item = &occipital.CreatorCatalogEntry{ID: strings.ToLower(entity.ID), Kind: rel.TargetType, Title: entity.Title, Artists: []occipital.CreditArtist{}, Roles: []string{}}
+			catalog[key] = item
+		}
+		if item.Disambiguation == "" {
+			item.Disambiguation = entity.Disambiguation
+		}
+		if item.Date == "" {
+			item.Date = entity.FirstReleaseDate
+			if rel.TargetType == "release" {
+				item.Date = entity.Date
 			}
 		}
-	}
-
-	return links
-}
-
-func extractCredits(artist mb.Artist) []occipital.CreatorCredit {
-	if artist.Relations == nil {
-		return nil
-	}
-
-	// Group recordings by credit type
-	creditMap := make(map[string][]occipital.CreatorRecording)
-
-	for _, rel := range *artist.Relations {
-		if rel.TargetType == "recording" && rel.Recording != nil {
-			creditType := rel.Type
-			// For instrument relations, include the attribute (e.g., "guitar", "bass")
-			if rel.Type == "instrument" && len(rel.Attributes) > 0 {
-				creditType = rel.Attributes[0]
-			}
-
-			// Extract artist name from recording's artist-credit
-			artist := ""
-			if rel.Recording.ArtistCredits != nil {
-				var parts []string
-				for _, ac := range *rel.Recording.ArtistCredits {
-					parts = append(parts, ac.Name+ac.JoinPhrase)
+		if len(item.Artists) == 0 {
+			for _, ac := range entity.ArtistCredits {
+				if ac.Name == "" {
+					continue
 				}
-				artist = strings.Join(parts, "")
+				artist := occipital.CreditArtist{Name: ac.Name}
+				if mbidPattern.MatchString(ac.Artist.ID) {
+					artist.ID = ac.Artist.ID
+				}
+				item.Artists = append(item.Artists, artist)
 			}
-
-			creditMap[creditType] = append(creditMap[creditType], occipital.CreatorRecording{
-				ID:     rel.Recording.ID,
-				Title:  rel.Recording.Title,
-				Artist: artist,
-			})
+		}
+		role := rel.Type
+		attrs := append([]string(nil), rel.Attributes...)
+		sort.Strings(attrs)
+		if len(attrs) > 0 {
+			role = strings.Join(attrs, ", ") + " " + role
+		}
+		if !contains(item.Roles, role) {
+			item.Roles = append(item.Roles, role)
 		}
 	}
-
-	var credits []occipital.CreatorCredit
-	for creditType, recordings := range creditMap {
-		credits = append(credits, occipital.CreatorCredit{
-			Type:       creditType,
-			Recordings: recordings,
-		})
+	for _, item := range catalog {
+		sort.Strings(item.Roles)
+		c.Catalog = append(c.Catalog, *item)
 	}
-
-	// Sort credits by number of recordings (descending)
-	sort.Slice(credits, func(i, j int) bool {
-		return len(credits[i].Recordings) > len(credits[j].Recordings)
+	sort.Slice(c.Catalog, func(i, j int) bool {
+		a, b := c.Catalog[i], c.Catalog[j]
+		if a.Title != b.Title {
+			return a.Title < b.Title
+		}
+		if a.Kind != b.Kind {
+			return a.Kind < b.Kind
+		}
+		return a.ID < b.ID
 	})
-
-	// Consolidate: keep top 10 credit types, merge the rest into "other"
-	const maxCreditTypes = 10
-	if len(credits) > maxCreditTypes {
-		var otherRecordings []occipital.CreatorRecording
-		seen := make(map[string]bool)
-		for _, c := range credits[maxCreditTypes:] {
-			for _, r := range c.Recordings {
-				if !seen[r.ID] {
-					seen[r.ID] = true
-					otherRecordings = append(otherRecordings, r)
-				}
-			}
+	sort.Slice(c.Connections, func(i, j int) bool {
+		a, b := c.Connections[i], c.Connections[j]
+		if a.Name != b.Name {
+			return a.Name < b.Name
 		}
-		credits = credits[:maxCreditTypes]
-		if len(otherRecordings) > 0 {
-			credits = append(credits, occipital.CreatorCredit{
-				Type:       fmt.Sprintf("other (%d types)", len(credits)),
-				Recordings: otherRecordings,
-			})
+		return a.Begin < b.Begin
+	})
+	sort.Slice(c.Links, func(i, j int) bool { return c.Links[i].URL < c.Links[j].URL })
+	groups := map[string][]occipital.CreatorRecording{}
+	for _, item := range c.Catalog {
+		if item.Kind != "recording" {
+			continue
+		}
+		names := []string{}
+		for _, artist := range item.Artists {
+			names = append(names, artist.Name)
+		}
+		for _, role := range item.Roles {
+			groups[role] = append(groups[role], occipital.CreatorRecording{ID: item.ID, Title: item.Title, Artist: strings.Join(names, ", ")})
 		}
 	}
-
-	return credits
+	for role, recordings := range groups {
+		c.Credits = append(c.Credits, occipital.CreatorCredit{Type: role, Recordings: recordings})
+	}
+	sort.Slice(c.Credits, func(i, j int) bool { return c.Credits[i].Type < c.Credits[j].Type })
+	return c
+}
+func contains(values []string, value string) bool {
+	for _, v := range values {
+		if v == value {
+			return true
+		}
+	}
+	return false
 }

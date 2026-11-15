@@ -225,18 +225,40 @@ type ReleaseImage struct {
 
 // Creator represents a music creator (artist, producer, engineer, etc.)
 type Creator struct {
-	ID             string             `json:"id"`
-	Name           string             `json:"name"`
-	Type           string             `json:"type"`
-	Disambiguation string             `json:"disambiguation,omitempty"`
-	Country        string             `json:"country,omitempty"`
-	Area           string             `json:"area,omitempty"`
-	BeginArea      string             `json:"begin_area,omitempty"`
-	ActiveYears    *ActiveYears       `json:"active_years,omitempty"`
-	Genres         []string           `json:"genres"`
-	Links          []ExternalLink     `json:"links"`
-	Credits        []CreatorCredit    `json:"credits"`
-	Highlights     []CreatorHighlight `json:"highlights,omitempty"`
+	ID             string                `json:"id"`
+	Name           string                `json:"name"`
+	Type           string                `json:"type"`
+	Disambiguation string                `json:"disambiguation,omitempty"`
+	Country        string                `json:"country,omitempty"`
+	Area           string                `json:"area,omitempty"`
+	BeginArea      string                `json:"begin_area,omitempty"`
+	ActiveYears    *ActiveYears          `json:"active_years,omitempty"`
+	Genres         []string              `json:"genres"`
+	Links          []ExternalLink        `json:"links"`
+	Credits        []CreatorCredit       `json:"credits"`
+	Highlights     []CreatorHighlight    `json:"highlights,omitempty"`
+	Catalog        []CreatorCatalogEntry `json:"catalog"`
+	Connections    []CreatorConnection   `json:"connections"`
+	SourceURL      string                `json:"source_url"`
+}
+
+type CreatorCatalogEntry struct {
+	ID             string         `json:"id"`
+	Kind           string         `json:"kind"`
+	Title          string         `json:"title"`
+	Disambiguation string         `json:"disambiguation,omitempty"`
+	Date           string         `json:"date,omitempty"`
+	Artists        []CreditArtist `json:"artists"`
+	Roles          []string       `json:"roles"`
+}
+
+type CreatorConnection struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Relation string `json:"relation"`
+	Begin    string `json:"begin,omitempty"`
+	End      string `json:"end,omitempty"`
+	Ended    bool   `json:"ended"`
 }
 
 type ActiveYears struct {
