@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,8 +22,10 @@ const (
 	artistCacheTTL        = 5 * time.Minute
 	artistCacheMaxEntries = 128
 	artistCacheMaxBytes   = 128 * 1024
-	artistPageSize        = 10
-	artistMaxOffset       = 990
+	artistPageSize        = 24
+	artistScanReleases    = 3
+	artistTrackPageSize   = 50
+	artistMaxOffset       = 1000000
 )
 
 // ArtistHandler serves a bounded artist catalog using the service credentials.
@@ -35,8 +38,10 @@ type ArtistHandler struct {
 }
 
 type artistCacheKey struct {
-	id     string
-	offset int
+	id      string
+	section string
+	cursor  artistCursor
+	offset  int
 }
 type cachedArtist struct {
 	body    []byte
@@ -55,14 +60,98 @@ type ArtistAlbum struct {
 	URL         string  `json:"url"`
 	ReleaseDate string  `json:"release_date"`
 	AlbumType   string  `json:"album_type"`
+	AlbumGroup  string  `json:"album_group"`
+}
+
+type ArtistTrack struct {
+	SearchTrack
+	AlbumID     string `json:"album_id"`
+	AlbumName   string `json:"album_name"`
+	ReleaseDate string `json:"release_date"`
 }
 
 type ArtistResponse struct {
-	Artist      ArtistDetails `json:"artist"`
-	Tracks      []SearchTrack `json:"tracks"`
-	Albums      []ArtistAlbum `json:"albums"`
-	NextOffset  *int          `json:"next_offset"`
-	Unavailable []string      `json:"unavailable"`
+	Artist ArtistDetails `json:"artist"`
+	Tracks []ArtistTrack `json:"tracks"`
+	Albums []ArtistAlbum `json:"albums"`
+	// Keep old clients from treating a release cursor as a search offset.
+	NextOffset        *int     `json:"next_offset"`
+	NextCursor        *string  `json:"next_cursor"`
+	NextReleaseOffset *int     `json:"next_release_offset"`
+	ReleaseTotal      int      `json:"release_total"`
+	ScannedReleases   int      `json:"scanned_releases"`
+	Unavailable       []string `json:"unavailable"`
+}
+
+type artistCursor struct{ release, track int }
+
+func (c artistCursor) String() string {
+	return strconv.Itoa(c.release) + "." + strconv.Itoa(c.track)
+}
+
+func artistInteger(value string) (int, error) {
+	if value == "" || strings.IndexFunc(value, func(r rune) bool { return r < '0' || r > '9' }) != -1 {
+		return 0, errors.New("invalid catalog position")
+	}
+	n, err := strconv.Atoi(value)
+	if err != nil || n > artistMaxOffset {
+		return 0, errors.New("invalid catalog position")
+	}
+	return n, nil
+}
+
+func parseArtistQuery(query url.Values) (artistCacheKey, error) {
+	key := artistCacheKey{id: query.Get("spotifyId"), section: "all"}
+	if len(query["spotifyId"]) != 1 || !spotifyIDPattern.MatchString(key.id) {
+		return key, errors.New("invalid Spotify artist ID")
+	}
+	if values, ok := query["section"]; ok {
+		if len(values) != 1 || (values[0] != "all" && values[0] != "songs" && values[0] != "releases") {
+			return key, errors.New("invalid artist section")
+		}
+		key.section = values[0]
+	}
+	if values, ok := query["offset"]; ok {
+		if len(values) != 1 {
+			return key, errors.New("invalid release offset")
+		}
+		n, err := artistInteger(values[0])
+		if err != nil || strconv.Itoa(n) != values[0] {
+			return key, errors.New("invalid release offset")
+		}
+		key.offset = n
+	}
+	if values, ok := query["cursor"]; ok {
+		if len(values) != 1 {
+			return key, errors.New("invalid song cursor")
+		}
+		parts := strings.Split(values[0], ".")
+		if len(parts) != 2 {
+			return key, errors.New("invalid song cursor")
+		}
+		release, err := artistInteger(parts[0])
+		if err != nil {
+			return key, err
+		}
+		track, err := artistInteger(parts[1])
+		if err != nil {
+			return key, err
+		}
+		key.cursor = artistCursor{release: release, track: track}
+		if key.cursor.String() != values[0] {
+			return key, errors.New("invalid song cursor")
+		}
+	}
+	if key.section == "all" && (key.offset != 0 || key.cursor != (artistCursor{})) {
+		return key, errors.New("all sections require the initial catalog position")
+	}
+	if key.section == "songs" && key.offset != 0 {
+		return key, errors.New("songs require a cursor, not a release offset")
+	}
+	if key.section == "releases" && key.cursor != (artistCursor{}) {
+		return key, errors.New("releases require an offset, not a song cursor")
+	}
+	return key, nil
 }
 
 func NewArtistHandler(log *zap.SugaredLogger, spotifyClient *spotify.SpotifyClient) *ArtistHandler {
@@ -78,24 +167,10 @@ func (h *ArtistHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		util.WriteJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	query := r.URL.Query()
-	id := query.Get("spotifyId")
-	if len(query["spotifyId"]) != 1 || !spotifyIDPattern.MatchString(id) {
-		util.WriteJSONError(w, http.StatusBadRequest, "invalid Spotify artist ID")
+	key, err := parseArtistQuery(r.URL.Query())
+	if err != nil {
+		util.WriteJSONError(w, http.StatusBadRequest, err.Error())
 		return
-	}
-	offset := 0
-	if values, present := query["offset"]; present {
-		var err error
-		if len(values) == 1 && values[0] != "" && strings.IndexFunc(values[0], func(r rune) bool { return r < '0' || r > '9' }) == -1 {
-			offset, err = strconv.Atoi(values[0])
-		} else {
-			err = errors.New("invalid offset")
-		}
-		if err != nil || offset > artistMaxOffset {
-			util.WriteJSONError(w, http.StatusBadRequest, "offset must be an integer from 0 to 990")
-			return
-		}
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), artistLoadTimeout)
 	defer cancel()
@@ -103,7 +178,6 @@ func (h *ArtistHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, ctx.Err())
 		return
 	}
-	key := artistCacheKey{id: id, offset: offset}
 	if body, ok := h.cached(key, time.Now()); ok {
 		w.Write(body)
 		return
@@ -125,7 +199,7 @@ func (h *ArtistHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Write(body)
 		return
 	}
-	resp, err := h.load(ctx, id, offset)
+	resp, err := h.load(ctx, key)
 	if errors.Is(r.Context().Err(), context.Canceled) {
 		return
 	}
@@ -144,72 +218,138 @@ func (h *ArtistHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Write(body)
 }
 
-func (h *ArtistHandler) load(ctx context.Context, id string, offset int) (ArtistResponse, error) {
-	artist, err := h.spotifyClient.Client.GetArtist(ctx, spot.ID(id))
+func (h *ArtistHandler) load(ctx context.Context, key artistCacheKey) (ArtistResponse, error) {
+	artist, err := h.spotifyClient.Client.GetArtist(ctx, spot.ID(key.id))
 	if err != nil {
 		return ArtistResponse{}, err
 	}
-	if artist == nil || string(artist.ID) != id || strings.TrimSpace(artist.Name) == "" {
+	if artist == nil || string(artist.ID) != key.id || strings.TrimSpace(artist.Name) == "" {
 		return ArtistResponse{}, errors.New("artist identity mismatch")
 	}
 	resp := ArtistResponse{
 		Artist: ArtistDetails{SearchArtist: mapArtist(*artist), Genres: append([]string{}, artist.Genres...)},
-		Tracks: []SearchTrack{}, Albums: []ArtistAlbum{}, Unavailable: []string{},
+		Tracks: []ArtistTrack{}, Albums: []ArtistAlbum{}, Unavailable: []string{},
 	}
-	var tracks *spot.SearchResult
-	var albums *spot.SimpleAlbumPage
-	var tracksErr, albumsErr error
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		// Quoting the catalog name narrows results. Identity checks below keep
-		// namesakes and other search matches out of this artist's tracks.
-		name := strings.NewReplacer(`\`, " ", `"`, " ").Replace(artist.Name)
-		tracks, tracksErr = h.spotifyClient.Client.Search(ctx, `artist:"`+name+`"`, spot.SearchTypeTrack, spot.Limit(artistPageSize), spot.Offset(offset))
-	}()
-	go func() {
-		defer wg.Done()
-		albums, albumsErr = h.spotifyClient.Client.GetArtistAlbums(ctx, spot.ID(id), []spot.AlbumType{spot.AlbumTypeAlbum, spot.AlbumTypeSingle}, spot.Limit(artistPageSize))
-	}()
-	wg.Wait()
-	if tracksErr != nil || tracks == nil || tracks.Tracks == nil {
-		resp.Unavailable = append(resp.Unavailable, "tracks")
-	} else {
-		for i, track := range tracks.Tracks.Tracks {
-			if i >= artistPageSize {
-				break
+	var releases *spot.SimpleAlbumPage
+	if key.section != "songs" {
+		releases, err = h.releases(ctx, key.id, key.offset, artistPageSize)
+		if err != nil || releases == nil {
+			resp.Unavailable = append(resp.Unavailable, "albums")
+			resp.NextReleaseOffset = &key.offset
+		} else {
+			resp.ReleaseTotal = max(0, int(releases.Total))
+			seen := make(map[string]bool)
+			count := min(len(releases.Albums), artistPageSize)
+			for _, album := range releases.Albums[:count] {
+				if !validArtistAlbum(album) || seen[string(album.ID)] {
+					continue
+				}
+				seen[string(album.ID)] = true
+				resp.Albums = append(resp.Albums, ArtistAlbum{
+					ID: string(album.ID), Name: album.Name, Image: spotifyImage(album.Images), URL: "https://open.spotify.com/album/" + string(album.ID),
+					ReleaseDate: album.ReleaseDate, AlbumType: album.AlbumType, AlbumGroup: album.AlbumGroup,
+				})
 			}
-			for _, artist := range track.Artists {
-				if string(artist.ID) == id {
-					mapped := mapTrack(track)
-					mapped.Thumb = spotifyImage(track.Album.Images)
-					resp.Tracks = append(resp.Tracks, mapped)
-					break
+			next := key.offset + count
+			if releases.Next != "" || next < resp.ReleaseTotal {
+				resp.NextReleaseOffset = &next
+				if count == 0 || next > artistMaxOffset {
+					resp.NextReleaseOffset = &key.offset
+					resp.Unavailable = append(resp.Unavailable, "albums")
 				}
 			}
 		}
-		if next := offset + artistPageSize; tracks.Tracks.Next != "" && next <= artistMaxOffset {
-			resp.NextOffset = &next
-		}
 	}
-	if albumsErr != nil || albums == nil {
-		resp.Unavailable = append(resp.Unavailable, "albums")
-	} else {
-		for _, album := range albums.Albums {
-			if len(resp.Albums) >= artistPageSize {
-				break
-			}
-			if !spotifyIDPattern.MatchString(string(album.ID)) || (album.AlbumType != "album" && album.AlbumType != "single") {
-				continue
-			}
-			resp.Albums = append(resp.Albums, ArtistAlbum{
-				ID: string(album.ID), Name: album.Name, Image: spotifyImage(album.Images),
-				URL: "https://open.spotify.com/album/" + string(album.ID), ReleaseDate: album.ReleaseDate, AlbumType: album.AlbumType,
-			})
-		}
+	if key.section != "releases" {
+		// The initial release page already contains the first scan entries. If it
+		// failed, try the smaller song source independently with the same deadline.
+		h.scanSongs(ctx, key, &resp, releases)
 	}
 	return resp, nil
+}
+
+func (h *ArtistHandler) releases(ctx context.Context, id string, offset, limit int) (*spot.SimpleAlbumPage, error) {
+	return h.spotifyClient.Client.GetArtistAlbums(ctx, spot.ID(id), []spot.AlbumType{spot.AlbumTypeAlbum, spot.AlbumTypeSingle, spot.AlbumTypeAppearsOn, spot.AlbumTypeCompilation}, spot.Market("US"), spot.Limit(limit), spot.Offset(offset))
+}
+
+func validArtistAlbum(album spot.SimpleAlbum) bool {
+	return spotifyIDPattern.MatchString(string(album.ID)) && strings.TrimSpace(album.Name) != "" && (album.AlbumType == "album" || album.AlbumType == "single" || album.AlbumType == "compilation")
+}
+
+func (h *ArtistHandler) scanSongs(ctx context.Context, key artistCacheKey, resp *ArtistResponse, releases *spot.SimpleAlbumPage) {
+	cursor := key.cursor
+	var err error
+	if releases == nil {
+		releases, err = h.releases(ctx, key.id, cursor.release, artistScanReleases)
+	}
+	if err != nil || releases == nil {
+		resp.songContinuation(cursor, true)
+		return
+	}
+	resp.ReleaseTotal = max(0, int(releases.Total))
+	resp.ScannedReleases = min(cursor.release, resp.ReleaseTotal)
+	count := min(len(releases.Albums), artistScanReleases)
+	if count == 0 {
+		if releases.Next != "" || cursor.release < resp.ReleaseTotal {
+			resp.songContinuation(cursor, true)
+		}
+		return
+	}
+	seen := make(map[string]bool)
+	for _, album := range releases.Albums[:count] {
+		if validArtistAlbum(album) {
+			page, err := h.spotifyClient.Client.GetAlbumTracks(ctx, album.ID, spot.Market("US"), spot.Limit(artistTrackPageSize), spot.Offset(cursor.track))
+			if err != nil || page == nil {
+				resp.songContinuation(cursor, true)
+				return
+			}
+			rawCount := min(len(page.Tracks), artistTrackPageSize)
+			consumed := 0
+			for _, track := range page.Tracks[:rawCount] {
+				consumed++
+				id := string(track.ID)
+				if spotifyIDPattern.MatchString(id) && strings.TrimSpace(track.Name) != "" && !seen[id] {
+					for _, credit := range track.Artists {
+						if string(credit.ID) == key.id {
+							seen[id] = true
+							resp.Tracks = append(resp.Tracks, ArtistTrack{
+								SearchTrack: SearchTrack{ID: id, Name: track.Name, Artist: util.GetFirstArtist(track.Artists), Thumb: spotifyImage(album.Images)},
+								AlbumID:     string(album.ID), AlbumName: album.Name, ReleaseDate: album.ReleaseDate,
+							})
+							break
+						}
+					}
+				}
+				if len(resp.Tracks) == artistPageSize {
+					break
+				}
+			}
+			cursor.track += consumed
+			// Consume raw provider entries, including filtered and repeated IDs. A
+			// partial album must stay at its exact position in the next request.
+			if consumed < rawCount || page.Next != "" || cursor.track < int(page.Total) {
+				resp.songContinuation(cursor, consumed == 0 || cursor.track > artistMaxOffset)
+				return
+			}
+		}
+		cursor.release++
+		cursor.track = 0
+		resp.ScannedReleases = min(cursor.release, resp.ReleaseTotal)
+		if len(resp.Tracks) == artistPageSize {
+			break
+		}
+	}
+	if cursor.release < resp.ReleaseTotal || cursor.release < key.cursor.release+len(releases.Albums) || releases.Next != "" {
+		resp.songContinuation(cursor, false)
+	}
+}
+
+func (resp *ArtistResponse) songContinuation(cursor artistCursor, unavailable bool) {
+	value := cursor.String()
+	resp.NextCursor = &value
+	if unavailable {
+		resp.Unavailable = append(resp.Unavailable, "tracks")
+	}
 }
 
 func (h *ArtistHandler) writeError(w http.ResponseWriter, err error) {
